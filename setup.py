@@ -1,14 +1,14 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='FHI_AL',
+    name='torchkrates',
     version='0.1',
     author='Tobias Henkes',
     author_email='tobias.henkes@uni.lu',
-    description='Active learning for FHI-aims',
+    description='Implementation of So3krates in mace-torch',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
-    url='https://github.com/tohenkes/FHI_AL',
+    url='ttps://github.com/tohenkes/So3krates-torch',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     classifiers=[
@@ -16,25 +16,10 @@ setup(
     ],
     python_requires='>=3.9',
     install_requires=[
-        'ase',
-        'numpy',
-        'mace-torch',
-        'asi4py',
-        'torch',
-        'pyYaml',
+        "ase",
+        "numpy",
+        "mace-torch",
+        "torch",
+        "pyYaml",
     ],
-    extras_require={
-        'parsl': ['parsl'],
-    },
-    entry_points={
-        'console_scripts': [
-            'FHI_AL=FHI_AL.cli.__main__:main',
-            'FHI_AL-initial-ds=FHI_AL.cli.create_initial_ds:main',
-            'FHI_AL-al=FHI_AL.cli.al_procedure_only:main',
-            "FHI_AL-scratch=FHI_AL.cli.scratch_train:main",
-            "FHI_AL-atomic-energies=FHI_AL.cli.get_atomic_energies:main",
-            "FHI_AL-test_ensemble=FHI_AL.cli.test_ensemble:main",
-            "FHI_AL-recalculate=FHI_AL.cli.recalculate_data:main",
-        ],
-    },
 )
