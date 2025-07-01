@@ -1,8 +1,11 @@
 from so3krates_torch.modules.models import So3krates
+from so3krates_torch.blocks import so3_conv_invariants
 from mace.tools import torch_geometric, utils
 from ase.build import molecule
 import torch
 from mace import data
+from e3nn import o3
+import time
 
 mol = molecule('H2O')
 r_max = 5.0
@@ -13,6 +16,8 @@ z_table = utils.AtomicNumberTable(
 
 complete_path = '/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/test_mace/test-520.model'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+#device = 'cpu'  # Use CPU for this example, change to 'cuda' if you have a GPU
+
 dtype = 'float32'  # or torch.float64, depending on your model's requirements
 torch.set_default_dtype(getattr(torch, dtype))
 
@@ -37,10 +42,12 @@ data_loader = torch_geometric.dataloader.DataLoader(
 
 batch = next(iter(data_loader)).to(device)
 
+max_l = 2
+
 model = So3krates(
     r_max=5.0,
     num_radial_basis=8,
-    max_l=3,
+    max_l=max_l,
     features_dim=16,
     ev_l=2,
     num_att_heads=4,
@@ -51,6 +58,28 @@ model = So3krates(
     use_so3=False,
     avg_num_neighbors=2,
     seed=42,
+    device=device,
 )
 model.to(device)
 print(model(batch))
+
+so3_conv_invariants = so3_conv_invariants.SO3ConvolutionInvariants(
+    max_l=max_l,
+).to(device)
+# create a test xyz vector
+xyz = torch.tensor([[0.0, 1.3, 1.0]], dtype=torch.float32, device=device)
+# transform the xyz vector to spherical harmonics
+sh = o3.SphericalHarmonics(
+    o3.Irreps.spherical_harmonics(max_l),
+    normalize=True,
+    normalization="component",
+)
+xyz_sh = sh(xyz).to(device)
+
+batched_xyz_sh = torch.stack([xyz_sh] * 20, dim=0)  # Create a batch of two identical vectors
+
+print(batched_xyz_sh.shape)
+current_time = time.time()
+tp_result = so3_conv_invariants(batched_xyz_sh , batched_xyz_sh )
+print(f"Time taken for tensor product: {time.time() - current_time:.4f} seconds")
+print(tp_result.shape)

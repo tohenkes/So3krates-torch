@@ -26,8 +26,10 @@ class So3krates(torch.nn.Module):
         num_elements: int,
         avg_num_neighbors: int,
         use_so3: bool = False,
+        interaction_bias: bool = True,
         cutoff_function: Optional[Callable[[torch.Tensor], torch.Tensor]] = CosineCutoff,
         seed: Optional[int] = None,
+        device: Union[str, torch.device] = "cpu",
         
         
     ):
@@ -45,12 +47,12 @@ class So3krates(torch.nn.Module):
         
         torch.manual_seed(seed)
         self.cutoff_function = cutoff_function(r_max)
-        self.invariant_feature_embedding = embedding.InvariantEmbedding(
+        self.inv_feature_embedding = embedding.InvariantEmbedding(
             in_features=num_elements,
             out_features=features_dim,
             bias=False,
         )
-        self.euclidean_embedding = embedding.EuclideanEmbedding(
+        self.ev_embedding = embedding.EuclideanEmbedding(
             avg_num_neighbors=avg_num_neighbors,
             max_l=max_l,
             cutoff_function=self.cutoff_function,
@@ -61,6 +63,10 @@ class So3krates(torch.nn.Module):
         self.euclidean_transformers = torch.nn.ModuleList(
             [
                 euclidean_transformer.EuclideanTransformer(
+                    max_l=max_l,
+                    features_dim=features_dim,
+                    interaction_bias=interaction_bias,
+                    device=device
                 )
                 for _ in range(num_interactions)
             ]
@@ -72,10 +78,8 @@ class So3krates(torch.nn.Module):
             layers=final_mlp_layers,
             bias=True,
             non_linearity=torch.nn.functional.silu,
+            final_non_linearity=False
         )
-            
-        
-        
 
     def forward(
         self,
@@ -113,24 +117,23 @@ class So3krates(torch.nn.Module):
 
         senders, receivers = data['edge_index'][0], data['edge_index'][1]
 
-        invariant_features = self.invariant_feature_embedding(
+        inv_features = self.inv_feature_embedding(
             x=data
         )
-        euclidean_features = self.euclidean_embedding(
+        ev_features = self.ev_embedding(
             senders=senders,
             receivers=receivers,
             lengths=lengths,
             vectors=vectors
         )
-        
         for transformer in self.euclidean_transformers:
-            invariant_features, euclidean_features = transformer(
-                invariant_features=invariant_features,
-                euclidean_features=euclidean_features,
+            inv_features, ev_features = transformer(
+                inv_features=inv_features,
+                ev_features=ev_features,
             )
         
         node_energies = self.output_block(
-            invariant_features
+            inv_features
         )
         total_energy = scatter.scatter_sum(
             src=node_energies,

@@ -56,12 +56,10 @@ class EuclideanEmbedding(torch.nn.Module):
         edge_embedding = self.spherical_harmonics(
             vectors
         )
-        scaled_neighbors = senders * self.cutoff_function(lengths)
+        scaled_neighbors = edge_embedding * self.cutoff_function(lengths)
         sum_scaled_neighbors = scatter.scatter_sum(
             src=scaled_neighbors,
             index=receivers,
             dim=0,
-            dim_size=edge_embedding.shape[0]
         ) * self.inv_avg_num_neighbors
-        
         return sum_scaled_neighbors
