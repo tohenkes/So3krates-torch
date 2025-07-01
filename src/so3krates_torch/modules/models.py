@@ -21,7 +21,6 @@ class So3krates(torch.nn.Module):
         num_radial_basis,
         max_l,
         features_dim,
-        ev_l,
         num_att_heads,
         final_mlp_layers: int,
         atomic_numbers: List[int],
@@ -93,7 +92,7 @@ class So3krates(torch.nn.Module):
 
         self.output_block = output_block.InvariantOutputHead(
             features_dim=features_dim,
-            final_output_features=1,
+            final_output_features=1,  # TODO: remove hardcoded value
             layers=final_mlp_layers,
             bias=True,
             non_linearity=torch.nn.functional.silu,
@@ -136,7 +135,6 @@ class So3krates(torch.nn.Module):
 
         senders, receivers = data["edge_index"][0], data["edge_index"][1]
 
-        
         sh_vectors = self.spherical_harmonics(vectors)
         cutoffs = self.cutoff_function(lengths)
         

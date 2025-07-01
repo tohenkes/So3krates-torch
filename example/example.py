@@ -49,7 +49,6 @@ model = So3krates(
     num_radial_basis=8,
     max_l=max_l,
     features_dim=16,
-    ev_l=2,
     num_att_heads=4,
     atomic_numbers=[1, 8],  # H and O
     final_mlp_layers=2,

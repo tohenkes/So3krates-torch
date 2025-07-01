@@ -216,6 +216,10 @@ class FilterNet(torch.nn.Module):
                 trainable_freqs=trainable_rbf,
             )
         
+        assert features_dim % 4 == 0, (
+            f"features_dim {features_dim} must be divisible by 4 for the EuclideanTransformer."
+        )
+        
         self.mlp_rbf = torch.nn.Sequential(
             torch.nn.Linear(
                 in_features=num_radial_basis,

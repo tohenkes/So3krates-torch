@@ -96,6 +96,7 @@ class BernsteinBasis(Module):
 def log_binomial_coefficient(n: int, k: int) -> float:
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
 
+@compile_mode("script")
 class BesselBasis(Module):
     def __init__(
         self,
