@@ -3,6 +3,7 @@ from e3nn.util.jit import compile_mode
 from e3nn import o3
 from typing import Callable, List, Dict, Optional
 
+
 @compile_mode("script")
 class InvariantOutputHead(torch.nn.Module):
     def __init__(
@@ -12,15 +13,17 @@ class InvariantOutputHead(torch.nn.Module):
         layers: int = 2,
         bias: bool = True,
         non_linearity: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
-        final_non_linearity: bool = False
+        final_non_linearity: bool = False,
     ):
         super().__init__()
         self.layers = torch.nn.ModuleList()
-        for _ in range(layers-1):
+        for _ in range(layers - 1):
             self.layers.append(
                 torch.nn.Linear(features_dim, features_dim, bias=bias)
             )
-        self.final_layer = torch.nn.Linear(features_dim, final_output_features, bias=bias)
+        self.final_layer = torch.nn.Linear(
+            features_dim, final_output_features, bias=bias
+        )
         self.non_linearity = non_linearity
         self.final_non_linearity = final_non_linearity
 

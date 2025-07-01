@@ -63,23 +63,3 @@ model = So3krates(
 model.to(device)
 print(model(batch))
 
-so3_conv_invariants = so3_conv_invariants.SO3ConvolutionInvariants(
-    max_l=max_l,
-).to(device)
-# create a test xyz vector
-xyz = torch.tensor([[0.0, 1.3, 1.0]], dtype=torch.float32, device=device)
-# transform the xyz vector to spherical harmonics
-sh = o3.SphericalHarmonics(
-    o3.Irreps.spherical_harmonics(max_l),
-    normalize=True,
-    normalization="component",
-)
-xyz_sh = sh(xyz).to(device)
-
-batched_xyz_sh = torch.stack([xyz_sh] * 20, dim=0)  # Create a batch of two identical vectors
-
-print(batched_xyz_sh.shape)
-current_time = time.time()
-tp_result = so3_conv_invariants(batched_xyz_sh , batched_xyz_sh )
-print(f"Time taken for tensor product: {time.time() - current_time:.4f} seconds")
-print(tp_result.shape)
