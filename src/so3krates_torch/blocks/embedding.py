@@ -7,14 +7,17 @@ from so3krates_torch.tools import scatter
 
 @compile_mode("script")
 class InvariantEmbedding(torch.nn.Module):
+    '''
+    Eq. 10 in https://doi.org/10.1038/s41467-024-50620-6
+    '''
     def __init__(
         self, in_features: int, out_features: int, bias: bool = False
     ):
         super().__init__()
         self.embedding = torch.nn.Linear(in_features, out_features, bias=bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.embedding(x["node_attrs"])
+    def forward(self, one_hot: torch.Tensor) -> torch.Tensor:
+        return self.embedding(one_hot)
 
     def reset_parameters(self):
         self.embedding.reset_parameters()
@@ -22,6 +25,9 @@ class InvariantEmbedding(torch.nn.Module):
 
 @compile_mode("script")
 class EuclideanEmbedding(torch.nn.Module):
+    '''
+    Eq. 11 in https://doi.org/10.1038/s41467-024-50620-6
+    '''
     def __init__(
         self,
     ):

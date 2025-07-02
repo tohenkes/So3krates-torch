@@ -11,7 +11,7 @@ from so3krates_torch.blocks import (
 )
 from so3krates_torch.tools import scatter
 from mace.modules.utils import get_outputs
-
+from mace.tools.torch_geometric.batch import Batch
 
 @compile_mode("script")
 class So3krates(torch.nn.Module):
@@ -53,10 +53,7 @@ class So3krates(torch.nn.Module):
 
         torch.manual_seed(seed)
         self.cutoff_function = cutoff_function(r_max)
-        if not use_so3:
-            sh_irreps = o3.Irreps.spherical_harmonics(max_l)
-        else:
-            sh_irreps = o3.Irreps.spherical_harmonics(max_l, p=1)
+        sh_irreps = o3.Irreps.spherical_harmonics(max_l)
 
         self.spherical_harmonics = o3.SphericalHarmonics(
             sh_irreps,
@@ -78,6 +75,7 @@ class So3krates(torch.nn.Module):
             [
                 euclidean_transformer.EuclideanTransformer(
                     max_l=max_l,
+                    num_heads=num_att_heads,
                     features_dim=features_dim,
                     r_max=r_max,
                     num_radial_basis=num_radial_basis,
@@ -113,6 +111,7 @@ class So3krates(torch.nn.Module):
         lammps_mliap: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
 
+        ######### PROCESSING DATA #########
         ctx = prepare_graph(
             data=data,
             compute_virials=compute_virials,
@@ -139,7 +138,7 @@ class So3krates(torch.nn.Module):
         cutoffs = self.cutoff_function(lengths)
         
         ######### EMBEDDING #########
-        inv_features = self.inv_feature_embedding(x=data)
+        inv_features = self.inv_feature_embedding(data["node_attrs"])
         ev_features = self.ev_embedding(
             sh_vectors=sh_vectors,
             cutoffs=cutoffs,
@@ -148,7 +147,6 @@ class So3krates(torch.nn.Module):
         )
         
         ######### TRANSFORMER #########
-        
         for transformer in self.euclidean_transformers:
             inv_features, ev_features = transformer(
                 inv_features=inv_features,

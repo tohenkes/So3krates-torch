@@ -21,7 +21,7 @@ class CosineCutoff(torch.nn.Module):
 
         return (
             0.5 * (torch.cos(torch.pi * x / self.r_max) + 1.0)
-            if torch.is_tensor(x)
+            if isinstance(x, torch.Tensor)
             else 0.5 * (torch.cos(torch.pi * x / self.r_max) + 1.0).item()
         )
 
