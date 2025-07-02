@@ -49,7 +49,7 @@ batch = next(iter(data_loader)).to(device)
 mace_mp_model_medium= mace_mp()
 mace_mp_model_small = mace_mp(model='small')
 
-max_l = 3
+max_l = 2
 model = So3krates(
     r_max=5.0,
     num_radial_basis=32,
@@ -57,7 +57,7 @@ model = So3krates(
     features_dim=132,
     num_att_heads=4,
     atomic_numbers=mol.get_atomic_numbers(),  # H and O
-    final_mlp_layers=2,
+    final_mlp_layers=2,  # TODO: check, does the last layer count?
     num_interactions=3,
     num_elements=len(set(mol.get_atomic_numbers())),
     use_so3=False,
@@ -66,6 +66,12 @@ model = So3krates(
     device=device,
 )
 model.to(device).eval()
+
+# print model parameters
+print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
+
+
+exit()
 scripted_model = jit.compile(model)
 compiled_model = torch.compile(model)
 

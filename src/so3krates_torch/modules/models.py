@@ -95,6 +95,7 @@ class So3krates(torch.nn.Module):
             bias=True,
             non_linearity=torch.nn.functional.silu,
             final_non_linearity=False,
+            use_non_linearity=True,
         )
 
     def forward(
