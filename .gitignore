@@ -30,7 +30,7 @@ dist/
 *.models
 *.pt
 /wandb
-*.xyz
+#*.xyz
 /checkpoints
 *.model
 /results

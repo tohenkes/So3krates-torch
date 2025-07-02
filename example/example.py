@@ -5,9 +5,11 @@ import torch
 from mace import data
 import time
 from e3nn.util import jit
-
+from ase.io import read
+from mace.modules.utils import compute_avg_num_neighbors
 
 mol = molecule('H2O')
+mol = read('So3krates-torch/example/aspirin.xyz')
 r_max = 5.0
 
 z_table = utils.AtomicNumberTable(
@@ -36,6 +38,9 @@ data_loader = torch_geometric.dataloader.DataLoader(
     shuffle=False,
     drop_last=False,
 )
+avg_num_neighbors = compute_avg_num_neighbors(
+    data_loader
+)
 
 batch = next(iter(data_loader)).to(device)
 
@@ -46,12 +51,12 @@ model = So3krates(
     max_l=max_l,
     features_dim=132,
     num_att_heads=4,
-    atomic_numbers=[1, 8],  # H and O
+    atomic_numbers=mol.get_atomic_numbers(),  # H and O
     final_mlp_layers=2,
     num_interactions=3,
-    num_elements=2,
+    num_elements=len(set(mol.get_atomic_numbers())),
     use_so3=False,
-    avg_num_neighbors=2,
+    avg_num_neighbors=avg_num_neighbors,
     seed=42,
     device=device,
 )
