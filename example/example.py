@@ -1,17 +1,10 @@
 from so3krates_torch.modules.models import So3krates
-from so3krates_torch.blocks import so3_conv_invariants
 from mace.tools import torch_geometric, utils
 from ase.build import molecule
 import torch
 from mace import data
-from e3nn import o3
 import time
 from e3nn.util import jit
-from mace.calculators import mace_mp
-
-import torch
-import torch.profiler
-from torch.profiler import ProfilerActivity
 
 
 mol = molecule('H2O')
@@ -20,10 +13,7 @@ r_max = 5.0
 z_table = utils.AtomicNumberTable(
             [int(z) for z in sorted(set(mol.get_atomic_numbers()))]
         )
-
-complete_path = '/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/test_mace/test-520.model'
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-#device = 'cpu'  # Use CPU for this example, change to 'cuda' if you have a GPU
 
 dtype = 'float32'  # or torch.float64, depending on your model's requirements
 torch.set_default_dtype(getattr(torch, dtype))
@@ -49,13 +39,7 @@ data_loader = torch_geometric.dataloader.DataLoader(
 
 batch = next(iter(data_loader)).to(device)
 
-#max_l = 3
-#mace_model = mace_mp(
-#    model='small',
-#    device=device,
-#)
-#mace_model.calculate(mol, properties=['energy', 'forces'])
-
+max_l = 3
 model = So3krates(
     r_max=5.0,
     num_radial_basis=32,
@@ -73,20 +57,37 @@ model = So3krates(
 )
 model.to(device).eval()
 scripted_model = jit.compile(model)
+compiled_model = torch.compile(model)
+
+batch= batch.to_dict()
+
+
+model(batch)
 time_start = time.time()
-batch = batch.to_dict()
+for i in range(100):
+    outputs = model(batch)
+time_end = time.time()
+print('######### Original Model #########')
+print(f"Time taken for 100 iterations: {time_end - time_start:.4f} seconds")
+print(f'Average time per iteration: {(time_end - time_start) / 100:.4f} seconds')
+print(f'Iterations per second: {100 / (time_end - time_start):.2f}')
 
-model.eval()
+scripted_model(batch)
+time_start = time.time()
+for i in range(100):
+    outputs = scripted_model(batch)
+time_end = time.time()
+print('######### Scripted Model #########')
+print(f"Time taken for 100 iterations: {time_end - time_start:.4f} seconds")
+print(f'Average time per iteration: {(time_end - time_start) / 100:.4f} seconds')
+print(f'Iterations per second: {100 / (time_end - time_start):.2f}')
 
-with torch.profiler.profile(
-    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],  # CUDA only if available
-    schedule=torch.profiler.schedule(wait=1, warmup=1, active=3),
-    on_trace_ready=torch.profiler.tensorboard_trace_handler('./logdir'),
-    record_shapes=True,
-    with_stack=True,
-    with_modules=True,
-) as prof:
-    for step in range(5):
-        output = model(batch)  # Your model inference here
-        prof.step()
-
+compiled_model(batch)
+time_start = time.time()
+for i in range(100):
+    outputs = compiled_model(batch)
+time_end = time.time()
+print('######### Compiled Model #########')
+print(f"Time taken for 100 iterations: {time_end - time_start:.4f} seconds")
+print(f'Average time per iteration: {(time_end - time_start) / 100:.4f} seconds')
+print(f'Iterations per second: {100 / (time_end - time_start):.2f}')
