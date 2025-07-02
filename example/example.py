@@ -7,9 +7,11 @@ import time
 from e3nn.util import jit
 from ase.io import read
 from mace.modules.utils import compute_avg_num_neighbors
+from mace.calculators import mace_mp
 
 mol = molecule('H2O')
 mol = read('So3krates-torch/example/aspirin.xyz')
+mol = read('So3krates-torch/example/ala4.xyz')
 r_max = 5.0
 
 z_table = utils.AtomicNumberTable(
@@ -43,6 +45,9 @@ avg_num_neighbors = compute_avg_num_neighbors(
 )
 
 batch = next(iter(data_loader)).to(device)
+
+mace_mp_model_medium= mace_mp()
+mace_mp_model_small = mace_mp(model='small')
 
 max_l = 3
 model = So3krates(
@@ -93,6 +98,24 @@ for i in range(100):
     outputs = compiled_model(batch)
 time_end = time.time()
 print('######### Compiled Model #########')
+print(f"Time taken for 100 iterations: {time_end - time_start:.4f} seconds")
+print(f'Average time per iteration: {(time_end - time_start) / 100:.4f} seconds')
+print(f'Iterations per second: {100 / (time_end - time_start):.2f}')
+
+time_start = time.time()
+for i in range(100):
+    mace_mp_model_medium.calculate(mol, properties=['energy', 'forces'])
+time_end = time.time()
+print('######### medium MACE MP Model #########')
+print(f"Time taken for 100 iterations: {time_end - time_start:.4f} seconds")
+print(f'Average time per iteration: {(time_end - time_start) / 100:.4f} seconds')
+print(f'Iterations per second: {100 / (time_end - time_start):.2f}')
+
+time_start = time.time()
+for i in range(100):
+    mace_mp_model_small.calculate(mol, properties=['energy', 'forces'])
+time_end = time.time()
+print('######### small MACE MP Model #########')
 print(f"Time taken for 100 iterations: {time_end - time_start:.4f} seconds")
 print(f'Average time per iteration: {(time_end - time_start) / 100:.4f} seconds')
 print(f'Iterations per second: {100 / (time_end - time_start):.2f}')
