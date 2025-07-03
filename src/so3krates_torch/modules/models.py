@@ -98,10 +98,9 @@ class So3krates(torch.nn.Module):
             use_non_linearity=True,
         )
 
-    def forward(
+    def get_representation(
         self,
         data: Dict[str, torch.Tensor],
-        training: bool = False,
         compute_force: bool = True,
         compute_virials: bool = False,
         compute_stress: bool = False,
@@ -110,8 +109,7 @@ class So3krates(torch.nn.Module):
         compute_edge_forces: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
-    ) -> Dict[str, Optional[torch.Tensor]]:
-
+    ):
         ######### PROCESSING DATA #########
         ctx = prepare_graph(
             data=data,
@@ -158,6 +156,33 @@ class So3krates(torch.nn.Module):
                 lengths=lengths,
                 cutoffs=cutoffs,
             )
+        return inv_features, ev_features
+    
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+        compute_edge_forces: bool = False,
+        compute_atomic_stresses: bool = False,
+        lammps_mliap: bool = False,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+
+
+        inv_features, ev_features = self.get_representation(
+            data=data,
+            compute_force=compute_force,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_displacement=compute_displacement,
+            compute_hessian=compute_hessian,
+            compute_edge_forces=compute_edge_forces,
+            lammps_mliap=lammps_mliap,
+        )
         
         ######### OUTPUT #########
         node_energies = self.output_block(inv_features)

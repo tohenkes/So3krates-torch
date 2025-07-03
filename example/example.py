@@ -15,7 +15,7 @@ mol = read('So3krates-torch/example/ala4.xyz')
 r_max = 5.0
 
 z_table = utils.AtomicNumberTable(
-            [int(z) for z in sorted(set(mol.get_atomic_numbers()))]
+            [int(z) for z in range(1, 120)]
         )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -45,11 +45,10 @@ avg_num_neighbors = compute_avg_num_neighbors(
 )
 
 batch = next(iter(data_loader)).to(device)
-
 mace_mp_model_medium= mace_mp()
 mace_mp_model_small = mace_mp(model='small')
 
-max_l = 2
+max_l = 3
 model = So3krates(
     r_max=5.0,
     num_radial_basis=32,
@@ -58,27 +57,37 @@ model = So3krates(
     num_att_heads=4,
     atomic_numbers=mol.get_atomic_numbers(),  # H and O
     final_mlp_layers=2,  # TODO: check, does the last layer count?
-    num_interactions=3,
-    num_elements=len(set(mol.get_atomic_numbers())),
+    num_interactions=1,
+    num_elements=len(z_table),
     use_so3=False,
     avg_num_neighbors=avg_num_neighbors,
     seed=42,
     device=device,
+    trainable_rbf=True,
 )
 model.to(device).eval()
 
 # print model parameters
 print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
+for name, param in model.named_parameters():
+    if param.requires_grad:
+        print(f"{name}: {param.shape} ({param.numel()} parameters)")
+
+# save params:
+torch.save(
+    model.state_dict(),
+    'So3krates-torch/example/torchkrates.pth',
+    
+)
 
 
-exit()
 scripted_model = jit.compile(model)
 compiled_model = torch.compile(model)
 
 batch= batch.to_dict()
-
-
 model(batch)
+
+exit()
 time_start = time.time()
 for i in range(100):
     outputs = model(batch)
