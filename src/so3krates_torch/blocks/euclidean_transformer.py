@@ -12,7 +12,7 @@ class EuclideanTransformer(torch.nn.Module):
     # create dummy class
     def __init__(
         self,
-        max_l: int,
+        degrees: List[int],
         num_heads: int,
         features_dim: int,
         num_radial_basis: int,
@@ -28,7 +28,7 @@ class EuclideanTransformer(torch.nn.Module):
         super().__init__()
 
         self.filter_net_inv = FilterNet(
-            max_l=max_l,
+            degrees=degrees,
             features_dim=features_dim,
             num_radial_basis=num_radial_basis,
             num_layers=filter_net_inv_layers,
@@ -36,7 +36,7 @@ class EuclideanTransformer(torch.nn.Module):
         )
         
         self.filter_net_ev = FilterNet(
-            max_l=max_l,
+            degrees=degrees,
             features_dim=features_dim,
             num_radial_basis=num_radial_basis,
             num_layers=filter_net_ev_layers,
@@ -44,7 +44,7 @@ class EuclideanTransformer(torch.nn.Module):
         )
         
         self.euclidean_attention_block = EuclideanAttentionBlock(
-            max_l=max_l,
+            degrees=degrees,
             num_heads=num_heads,
             features_dim=features_dim,
             filter_net_inv=self.filter_net_inv,
@@ -54,7 +54,7 @@ class EuclideanTransformer(torch.nn.Module):
             avg_num_neighbors=avg_num_neighbors,
         )
         self.interaction_block = InteractionBlock(
-            max_l=max_l,
+            degrees=degrees,
             features_dim=features_dim,
             bias=interaction_bias,
             device=device,
@@ -88,7 +88,6 @@ class EuclideanTransformer(torch.nn.Module):
         # Eq. 26, 27 in https://doi.org/10.1038/s41467-024-50620-6
         new_inv_features = att_inv_features + d_inv_features
         new_ev_features = att_ev_features + d_ev_features
-
         return new_inv_features, new_ev_features
 
 
@@ -99,7 +98,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
     '''
     def __init__(
         self,
-        max_l: int,
+        degrees: List[int],
         num_heads: int,
         features_dim: int,
         filter_net_inv: callable,
@@ -111,15 +110,16 @@ class EuclideanAttentionBlock(torch.nn.Module):
     ):
         super().__init__()
 
-        self.max_l = max_l
-        self.ev_features_dim = (max_l + 1)**2
+        self.ev_features_dim = torch.sum(
+            torch.tensor([2 * y + 1 for y in degrees]
+                         )).item()
         self.inv_features_dim = features_dim
-        self.so3_conv_invariants = SO3ConvolutionInvariants(max_l=max_l)
+        self.so3_conv_invariants = SO3ConvolutionInvariants(degrees=degrees)
 
         self.filter_net_inv = filter_net_inv
         self.filter_net_ev = filter_net_ev
         
-        sqrt_5 = math.sqrt(5)
+
         # query, key, value weights for invariants
         self.inv_heads = num_heads
         self.inv_head_dim = features_dim // num_heads
@@ -140,8 +140,8 @@ class EuclideanAttentionBlock(torch.nn.Module):
         )
         # query, key weights for ev features
         # no value weights, as it uses spherical harmonics as values
-        self.ev_heads = max_l + 1
-        self.ev_head_dim = features_dim // (max_l + 1)
+        self.ev_heads = len(degrees)
+        self.ev_head_dim = features_dim // len(degrees)
         self.W_q_ev = torch.nn.Parameter(
             torch.empty(
                 self.ev_heads, self.ev_head_dim, self.ev_head_dim
@@ -153,6 +153,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             )
         )
         # initialize the weights
+        sqrt_5 = math.sqrt(5)
         torch.nn.init.kaiming_uniform_(self.W_q_inv, a=sqrt_5)
         torch.nn.init.kaiming_uniform_(self.W_k_inv, a=sqrt_5)
         torch.nn.init.kaiming_uniform_(self.W_v_inv, a=sqrt_5)
@@ -182,7 +183,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             self.qk_non_linearity = torch.nn.Identity()
         
         self.degree_repeats = torch.tensor(
-            [2 * y + 1 for y in range(self.max_l + 1)],
+            [2 * y + 1 for y in degrees],
         ).to(device)
         
     def forward(
@@ -214,7 +215,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
         filter_w_inv = filter_w_inv.view(
             -1, self.inv_heads, self.inv_head_dim
         )
-        # now has shape [neighbors, max_l+1, ev_head_dim]
+        # now has shape [neighbors, len(degrees), ev_head_dim]
         filter_w_ev = filter_w_ev.view(
             -1, self.ev_heads, self.ev_head_dim
         )
@@ -224,7 +225,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             -1, self.inv_heads, self.inv_head_dim
         )
         # now for the invariants used for updating the ev features
-        # has shape [nodes, max_l+1, ev_head_dim] now
+        # has shape [nodes, len(degrees), ev_head_dim] now
         inv_features_ev = inv_features.view(
             -1, self.ev_heads, self.ev_head_dim
         )
@@ -297,23 +298,23 @@ class InteractionBlock(torch.nn.Module):
     '''
     def __init__(
         self,
-        max_l: int,
+        degrees: List[int],
         features_dim: int,
         bias: bool = True,
         device: Union[str, torch.device] = "cpu",
     ):
         super().__init__()
-        self.max_l = max_l
+        len_degrees = len(degrees)
         self.linear_layer = torch.nn.Linear(
-            in_features=features_dim + max_l + 1,
-            out_features=features_dim + max_l + 1,
+            in_features=features_dim + len_degrees,
+            out_features=features_dim + len_degrees,
             bias=bias,
         )
-        self.so3_conv_invariants = SO3ConvolutionInvariants(max_l=max_l)
+        self.so3_conv_invariants = SO3ConvolutionInvariants(degrees=degrees)
         # repeat the b_ev_features for each degree
-        # e.g. for max_l=2, we have repeats = [1, 3, 5]
+        # e.g. for degrees=[0,1,2], we have repeats = [1, 3, 5]
         self.degree_repeats = torch.tensor(
-            [2 * y + 1 for y in range(self.max_l + 1)],
+            [2 * y + 1 for y in degrees],
         ).to(device)
 
     def forward(
@@ -339,6 +340,7 @@ class InteractionBlock(torch.nn.Module):
         )
         # Eq. 24 in https://doi.org/10.1038/s41467-024-50620-6
         d_ev_features = b_ev_features * ev_features
+        
         return d_inv_features, d_ev_features
 
 
@@ -349,7 +351,7 @@ class FilterNet(torch.nn.Module):
     '''
     def __init__(
         self,
-        max_l: int,
+        degrees: List[int],
         num_radial_basis: int,
         features_dim: int,
         num_layers: int = 2,
@@ -372,7 +374,7 @@ class FilterNet(torch.nn.Module):
         )
         self.mlp_ev = torch.nn.Sequential(
             torch.nn.Linear(
-                in_features=max_l + 1,
+                in_features=len(degrees),
                 out_features=features_dim // 4,
             ),
             non_linearity(),

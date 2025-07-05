@@ -17,11 +17,11 @@ from so3krates_torch.blocks import radial_basis
 class So3krates(torch.nn.Module):
     def __init__(
         self,
-        r_max,
-        num_radial_basis,
-        max_l,
-        features_dim,
-        num_att_heads,
+        r_max: float,
+        num_radial_basis: int,
+        degrees: List[int],
+        features_dim: int,
+        num_att_heads: int,
         final_mlp_layers: int,
         atomic_numbers: List[int],
         num_interactions: int,
@@ -54,7 +54,7 @@ class So3krates(torch.nn.Module):
         self.cutoff_function = cutoff_function(r_max)
         
         self.spherical_harmonics = RealSphericalHarmonics(
-            l_max=max_l
+            degrees=degrees,
         )
         
         self.inv_feature_embedding = embedding.InvariantEmbedding(
@@ -78,7 +78,7 @@ class So3krates(torch.nn.Module):
         self.euclidean_transformers = torch.nn.ModuleList(
             [
                 euclidean_transformer.EuclideanTransformer(
-                    max_l=max_l,
+                    degrees=degrees,
                     num_heads=num_att_heads,
                     features_dim=features_dim,
                     num_radial_basis=num_radial_basis,
@@ -143,7 +143,6 @@ class So3krates(torch.nn.Module):
         self.vectors_unit = self.vectors / self.vectors.norm(dim=-1, keepdim=True)
         sh_vectors = self.spherical_harmonics(self.vectors_unit)
         cutoffs = self.cutoff_function(self.lengths)
-        print(sh_vectors[0,:5])
         
         ######### EMBEDDING #########
         inv_features = self.inv_feature_embedding(data["node_attrs"])

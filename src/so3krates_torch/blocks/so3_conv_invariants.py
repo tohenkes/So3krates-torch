@@ -8,13 +8,12 @@ from typing import Callable, List, Dict, Optional
 class SO3ConvolutionInvariants(torch.nn.Module):
     def __init__(
         self,
-        max_l: int,
+        degrees: List[int],
     ):
         super().__init__()
-        self.max_l = max_l
 
         irreps_list = []
-        for l in range(max_l + 1):
+        for l in degrees:
             standard_parity = "e" if l % 2 == 0 else "o"
             irreps_list.append(o3.Irrep(f"{l}{standard_parity}"))
         self.irreps_in = o3.Irreps(irreps_list)

@@ -113,7 +113,7 @@ batch = next(iter(data_loader)).to_dict()
 cfg = config_dict.ConfigDict()
 cfg.model = config_dict.ConfigDict()
 
-cfg.model.num_layers =10
+cfg.model.num_layers =3
 cfg.model.num_features = 132
 cfg.model.num_heads = 4
 cfg.model.num_features_head = 32
@@ -122,7 +122,7 @@ cfg.model.num_radial_basis_fn = 32
 cfg.model.cutoff_fn = 'cosine'
 cfg.model.cutoff = 5.0
 cfg.model.cutoff_lr = None
-cfg.model.degrees = [0,1,2,3]
+cfg.model.degrees = [1,2,3,4]
 cfg.model.residual_mlp_1 = False
 cfg.model.residual_mlp_2 = False
 cfg.model.layer_normalization_1 = False
@@ -136,7 +136,7 @@ cfg.model.output_is_zero_at_init = False
 cfg.model.input_convention = 'positions'
 cfg.model.use_charge_embed = False
 cfg.model.use_spin_embed = False
-cfg.model.energy_regression_dim = 132
+cfg.model.energy_regression_dim = cfg.model.num_features
 cfg.model.energy_activation_fn = 'silu'
 cfg.model.energy_learn_atomic_type_scales = False
 cfg.model.energy_learn_atomic_type_shifts = False
@@ -270,10 +270,10 @@ calc = AseCalculatorSparse.create_from_workdir(
 max_l = 3
 model = So3krates(
     r_max=5.0,
-    num_radial_basis=32,
-    max_l=max_l,
-    features_dim=132,
-    num_att_heads=4,
+    num_radial_basis=cfg.model.num_radial_basis_fn,
+    degrees=cfg.model.degrees,
+    features_dim=cfg.model.num_features,
+    num_att_heads=cfg.model.num_heads,
     atomic_numbers=mol.get_atomic_numbers(),  # H and O
     final_mlp_layers=2,  # TODO: check, does the last layer count?
     num_interactions=cfg.model.num_layers,
@@ -332,9 +332,9 @@ if compute:
 print("\n\n")
 print("##############  RESULTS  ##############")
 
-print(f"TORCH version: {result['energy'].item():.22f}")
+print(f"TORCH version: {result['energy'].item():.10f}")
 if compute:
-    print(f"JAX version  : {calc.results['energy']:.22f}")
-    print(f"Difference   : {calc.results['energy'] - result['energy'].item():.22f}")
+    print(f"JAX version  : {calc.results['energy']:.10f}")
+    print(f"Difference   : {calc.results['energy'] - result['energy'].item():.10f}")
     
     

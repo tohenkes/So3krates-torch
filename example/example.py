@@ -48,19 +48,19 @@ batch = next(iter(data_loader)).to(device)
 mace_mp_model_medium= mace_mp()
 mace_mp_model_small = mace_mp(model='small')
 
-max_l = 3
+degrees = [1,2,3,4]
 model = So3krates(
     r_max=5.0,
     num_radial_basis=32,
-    max_l=max_l,
+    degrees=degrees,
     features_dim=132,
     num_att_heads=4,
     atomic_numbers=mol.get_atomic_numbers(),  # H and O
     final_mlp_layers=2,  # TODO: check, does the last layer count?
     num_interactions=1,
     num_elements=len(z_table),
-    use_so3=False,
     avg_num_neighbors=avg_num_neighbors,
+    message_normalization='avg_num_neighbors',
     seed=42,
     device=device,
     trainable_rbf=True,
