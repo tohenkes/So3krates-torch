@@ -1,9 +1,9 @@
 import torch
 from typing import Any, Callable, Dict, List, Optional, Type, Union
-from e3nn import o3
 from e3nn.util.jit import compile_mode
 from mace.modules.utils import prepare_graph
 from so3krates_torch.modules.cutoff import CosineCutoff
+from so3krates_torch.modules.spherical_harmonics import RealSphericalHarmonics
 from so3krates_torch.blocks import (
     embedding,
     euclidean_transformer,
@@ -11,7 +11,7 @@ from so3krates_torch.blocks import (
 )
 from so3krates_torch.tools import scatter
 from mace.modules.utils import get_outputs
-from mace.tools.torch_geometric.batch import Batch
+from so3krates_torch.blocks import radial_basis
 
 @compile_mode("script")
 class So3krates(torch.nn.Module):
@@ -27,12 +27,11 @@ class So3krates(torch.nn.Module):
         num_interactions: int,
         num_elements: int,
         avg_num_neighbors: int,
+        message_normalization: str = "sqrt_num_features",
+        initialize_ev_to_zeros: bool = True,
         radial_basis_fn: str = "gaussian",
         trainable_rbf: bool = False,
-        use_so3: bool = False,
         interaction_bias: bool = True,
-        normalize_sh: bool = True,
-        normalization_sh: str = "component",
         cutoff_function: Optional[
             Callable[[torch.Tensor], torch.Tensor]
         ] = CosineCutoff,
@@ -53,12 +52,9 @@ class So3krates(torch.nn.Module):
 
         torch.manual_seed(seed)
         self.cutoff_function = cutoff_function(r_max)
-        sh_irreps = o3.Irreps.spherical_harmonics(max_l)
-
-        self.spherical_harmonics = o3.SphericalHarmonics(
-            sh_irreps,
-            normalize=normalize_sh,
-            normalization=normalization_sh,
+        
+        self.spherical_harmonics = RealSphericalHarmonics(
+            l_max=max_l
         )
         
         self.inv_feature_embedding = embedding.InvariantEmbedding(
@@ -66,22 +62,29 @@ class So3krates(torch.nn.Module):
             out_features=features_dim,
             bias=False,
         )
-        self.ev_embedding = embedding.EuclideanEmbedding()
+        self.ev_embedding = embedding.EuclideanEmbedding(
+            initialization_to_zeros=initialize_ev_to_zeros,
+        )
         self.avg_num_neighbors = avg_num_neighbors
         self.inv_avg_num_neighbors = 1.0 / avg_num_neighbors
 
-        
+        self.radial_embedding = radial_basis.ComputeRBF(
+            r_max=r_max,
+            num_radial_basis=num_radial_basis,
+            radial_basis_fn=radial_basis_fn,
+            trainable=trainable_rbf,
+        )
+
         self.euclidean_transformers = torch.nn.ModuleList(
             [
                 euclidean_transformer.EuclideanTransformer(
                     max_l=max_l,
                     num_heads=num_att_heads,
                     features_dim=features_dim,
-                    r_max=r_max,
                     num_radial_basis=num_radial_basis,
-                    radial_basis_fn=radial_basis_fn,
-                    trainable_rbf=trainable_rbf,
                     interaction_bias=interaction_bias,
+                    message_normalization=message_normalization,
+                    avg_num_neighbors=avg_num_neighbors,
                     device=device,
                 )
                 for _ in range(num_interactions)
@@ -118,23 +121,29 @@ class So3krates(torch.nn.Module):
             compute_displacement=compute_displacement,
             lammps_mliap=lammps_mliap,
         )
-        is_lammps = ctx.is_lammps
-        num_atoms_arange = ctx.num_atoms_arange
-        num_graphs = ctx.num_graphs
-        displacement = ctx.displacement
-        positions = ctx.positions
-        vectors = ctx.vectors
-        lengths = ctx.lengths
-        cell = ctx.cell
-        node_heads = ctx.node_heads
-        interaction_kwargs = ctx.interaction_kwargs
-        lammps_natoms = interaction_kwargs.lammps_natoms
-        lammps_class = interaction_kwargs.lammps_class
+        self.is_lammps = ctx.is_lammps
+        self.num_atoms_arange = ctx.num_atoms_arange
+        self.num_graphs = ctx.num_graphs
+        self.displacement = ctx.displacement
+        self.positions = ctx.positions
+        # for some reason the vectors in so3krates are pointing in the
+        # opposite direction compared to how its usually done. But this
+        # does not matter for the model, as long as we are consistent
+        self.vectors = -1. * ctx.vectors
+        self.lengths = ctx.lengths
+        self.cell = ctx.cell
+        self.node_heads = ctx.node_heads
+        self.interaction_kwargs = ctx.interaction_kwargs
+        self.lammps_natoms = self.interaction_kwargs.lammps_natoms
+        self.lammps_class = self.interaction_kwargs.lammps_class
 
         senders, receivers = data["edge_index"][0], data["edge_index"][1]
 
-        sh_vectors = self.spherical_harmonics(vectors)
-        cutoffs = self.cutoff_function(lengths)
+        # normalize the vectors to unit length
+        self.vectors_unit = self.vectors / self.vectors.norm(dim=-1, keepdim=True)
+        sh_vectors = self.spherical_harmonics(self.vectors_unit)
+        cutoffs = self.cutoff_function(self.lengths)
+        print(sh_vectors[0,:5])
         
         ######### EMBEDDING #########
         inv_features = self.inv_feature_embedding(data["node_attrs"])
@@ -144,16 +153,17 @@ class So3krates(torch.nn.Module):
             receivers=receivers,
             inv_avg_num_neighbors=self.inv_avg_num_neighbors,
         )
+        rbf = self.radial_embedding(self.lengths)
         
         ######### TRANSFORMER #########
         for transformer in self.euclidean_transformers:
             inv_features, ev_features = transformer(
                 inv_features=inv_features,
                 ev_features=ev_features,
+                rbf=rbf,
                 senders=senders,
                 receivers=receivers,
                 sh_vectors=sh_vectors,
-                lengths=lengths,
                 cutoffs=cutoffs,
             )
         return inv_features, ev_features
@@ -187,14 +197,14 @@ class So3krates(torch.nn.Module):
         ######### OUTPUT #########
         node_energies = self.output_block(inv_features)
         total_energy = scatter.scatter_sum(
-            src=node_energies, index=data["batch"], dim=0, dim_size=num_graphs
+            src=node_energies, index=data["batch"], dim=0, dim_size=self.num_graphs
         )
         forces, virials, stress, hessian, edge_forces = get_outputs(
             energy=total_energy,
-            positions=positions,
-            displacement=displacement,
-            vectors=vectors,
-            cell=cell,
+            positions=self.positions,
+            displacement=self.displacement,
+            vectors=self.vectors,
+            cell=self.cell,
             training=training,
             compute_force=compute_force,
             compute_virials=compute_virials,

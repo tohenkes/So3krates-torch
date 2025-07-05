@@ -129,3 +129,43 @@ class BesselBasis(Module):
         output = sin_term / r_expanded  # (..., n_rbf)
 
         return output
+
+
+@compile_mode("script")
+class ComputeRBF(Module):
+    def __init__(
+            self,
+            r_max: float,
+            num_radial_basis: int,
+            trainable: bool = True,
+            radial_basis_fn: str = "gaussian"
+        ):
+        super().__init__()
+
+        radial_basis_fn = radial_basis_fn.lower()
+        assert radial_basis_fn in [
+            "gaussian",
+            "bernstein",
+            "bessel",
+        ], f"Radial basis '{radial_basis_fn}' is not supported. Choose from 'gaussian', 'bernstein', or 'bessel'."
+        
+        if radial_basis_fn == "gaussian":
+            self.radial_basis_fn = GaussianBasis(
+                r_max=r_max,
+                num_radial_basis=num_radial_basis,
+                trainable=trainable,
+            )
+        elif radial_basis_fn == "bernstein":
+            self.radial_basis = BernsteinBasis(
+                n_rbf=num_radial_basis,
+                r_cut=r_max,
+                trainable_gamma=trainable,
+            )
+        elif radial_basis_fn == "bessel":
+            self.radial_basis_fn = BesselBasis(
+                n_rbf=num_radial_basis,
+                r_cut=r_max,
+                trainable_freqs=trainable,
+            )
+    def forward(self, distances: torch.Tensor) -> torch.Tensor:
+        return self.radial_basis_fn(distances)

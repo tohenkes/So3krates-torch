@@ -31,7 +31,7 @@
         "num_features": 132,
         "num_features_head": 32,
         "num_heads": 4,
-        "num_layers": 1,
+        "num_layers": 10,
         "num_radial_basis_fn": 32,
         "output_intermediate_quantities": false,
         "output_is_zero_at_init": false,

@@ -81,11 +81,13 @@ torch.save(
 )
 
 
-scripted_model = jit.compile(model)
+#scripted_model = jit.compile(model)
 compiled_model = torch.compile(model)
 
 batch= batch.to_dict()
-model(batch)
+result = model(batch)
+
+print(f"{result['energy'].item():.4f}")
 
 exit()
 time_start = time.time()

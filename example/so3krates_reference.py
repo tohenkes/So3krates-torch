@@ -12,6 +12,12 @@ import jax.numpy as jnp
 from flax.core import unfreeze
 import flax
 from mlff.calculators.ase_calculator import AseCalculatorSparse
+import numpy as np
+from mlff.sph_ops import make_l0_contraction_fn
+from so3krates_torch.blocks.so3_conv_invariants import SO3ConvolutionInvariants
+from so3krates_torch.modules.spherical_harmonics import RealSphericalHarmonics
+
+
 
 def print_param_shapes(params, prefix=''):
     if isinstance(params, dict) or isinstance(params, flax.core.frozen_dict.FrozenDict):
@@ -35,6 +41,20 @@ def print_param_shapes_and_count(params, prefix=''):
     _recurse(params, prefix)
     print(f"\nTotal parameters: {total}")
     
+def flatten_params(params, prefix=''):
+    flat_params = {}
+
+    def _recurse(p, prefix=''):
+        if isinstance(p, dict) or isinstance(p, flax.core.frozen_dict.FrozenDict):
+            for k, v in p.items():
+                _recurse(v, prefix=f"{prefix}/{k}" if prefix else k)
+        else:
+            flat_params[prefix] = p
+
+    _recurse(params, prefix)
+    return flat_params
+
+
 def collect_param_dtypes(params, prefix=''):
     dtypes = {}
 
@@ -50,14 +70,13 @@ def collect_param_dtypes(params, prefix=''):
 
 
 
-
 #mol = molecule('H2O')
 #mol = read('So3krates-torch/example/aspirin.xyz')
 mol = read('So3krates-torch/example/ala4.xyz')
 r_max = 5.0
 
 z_table = utils.AtomicNumberTable(
-            [int(z) for z in sorted(set(mol.get_atomic_numbers()))]
+            [int(z) for z in range(1, 119)]
         )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -94,7 +113,7 @@ batch = next(iter(data_loader)).to_dict()
 cfg = config_dict.ConfigDict()
 cfg.model = config_dict.ConfigDict()
 
-cfg.model.num_layers =1
+cfg.model.num_layers =10
 cfg.model.num_features = 132
 cfg.model.num_heads = 4
 cfg.model.num_features_head = 32
@@ -167,12 +186,72 @@ inputs = {
 
 params = model.init(key,inputs)
 params = unfreeze(params)
-print_param_shapes_and_count(params)
 
-dtypes = collect_param_dtypes(params)
-print("\nParameter dtypes:")
-for k, v in dtypes.items():
-    print(f"{k}: {v}")
+flattened_params = flatten_params(params)
+#for k, v in flattened_params.items():
+#    print(f"{k}: {v.shape} ({v.size} parameters)")
+
+
+def generate_full_flax_to_torch_mapping(num_layers: int):
+    mapping = {}
+
+    # Embedding layers
+    mapping["params/feature_embeddings_0/Embed_0/embedding"] = "inv_feature_embedding.embedding.weight"
+    mapping["params/geometry_embeddings_0/rbf_fn/centers"] = "radial_embedding.radial_basis_fn.centers"
+    mapping["params/geometry_embeddings_0/rbf_fn/widths"] = "radial_embedding.radial_basis_fn.widths"
+
+    # Per-layer transformer mappings
+    for i in range(num_layers):
+        flax_prefix = f"params/layers_{i}/attention_block"
+        torch_prefix = f"euclidean_transformers.{i}"
+
+        # Radial filters (inv)
+        mapping[f"{flax_prefix}/radial_filter1_layer_1/kernel"] = f"{torch_prefix}.filter_net_inv.mlp_rbf.0.weight"
+        mapping[f"{flax_prefix}/radial_filter1_layer_1/bias"] = f"{torch_prefix}.filter_net_inv.mlp_rbf.0.bias"
+        mapping[f"{flax_prefix}/radial_filter1_layer_2/kernel"] = f"{torch_prefix}.filter_net_inv.mlp_rbf.mlp_rbf_layer_1.0.weight"
+        mapping[f"{flax_prefix}/radial_filter1_layer_2/bias"] = f"{torch_prefix}.filter_net_inv.mlp_rbf.mlp_rbf_layer_1.0.bias"
+
+        # Radial filters (ev)
+        mapping[f"{flax_prefix}/radial_filter2_layer_1/kernel"] = f"{torch_prefix}.filter_net_ev.mlp_rbf.0.weight"
+        mapping[f"{flax_prefix}/radial_filter2_layer_1/bias"] = f"{torch_prefix}.filter_net_ev.mlp_rbf.0.bias"
+        mapping[f"{flax_prefix}/radial_filter2_layer_2/kernel"] = f"{torch_prefix}.filter_net_ev.mlp_rbf.mlp_rbf_layer_1.0.weight"
+        mapping[f"{flax_prefix}/radial_filter2_layer_2/bias"] = f"{torch_prefix}.filter_net_ev.mlp_rbf.mlp_rbf_layer_1.0.bias"
+
+        # Spherical filters (inv)
+        mapping[f"{flax_prefix}/spherical_filter1_layer_1/kernel"] = f"{torch_prefix}.filter_net_inv.mlp_ev.0.weight"
+        mapping[f"{flax_prefix}/spherical_filter1_layer_1/bias"] = f"{torch_prefix}.filter_net_inv.mlp_ev.0.bias"
+        mapping[f"{flax_prefix}/spherical_filter1_layer_2/kernel"] = f"{torch_prefix}.filter_net_inv.mlp_ev.mlp_ev_layer_1.0.weight"
+        mapping[f"{flax_prefix}/spherical_filter1_layer_2/bias"] = f"{torch_prefix}.filter_net_inv.mlp_ev.mlp_ev_layer_1.0.bias"
+
+        # Spherical filters (ev)
+        mapping[f"{flax_prefix}/spherical_filter2_layer_1/kernel"] = f"{torch_prefix}.filter_net_ev.mlp_ev.0.weight"
+        mapping[f"{flax_prefix}/spherical_filter2_layer_1/bias"] = f"{torch_prefix}.filter_net_ev.mlp_ev.0.bias"
+        mapping[f"{flax_prefix}/spherical_filter2_layer_2/kernel"] = f"{torch_prefix}.filter_net_ev.mlp_ev.mlp_ev_layer_1.0.weight"
+        mapping[f"{flax_prefix}/spherical_filter2_layer_2/bias"] = f"{torch_prefix}.filter_net_ev.mlp_ev.mlp_ev_layer_1.0.bias"
+
+        # Attention weights
+        mapping[f"{flax_prefix}/Wq1"] = f"{torch_prefix}.euclidean_attention_block.W_q_inv"
+        mapping[f"{flax_prefix}/Wk1"] = f"{torch_prefix}.euclidean_attention_block.W_k_inv"
+        mapping[f"{flax_prefix}/Wv1"] = f"{torch_prefix}.euclidean_attention_block.W_v_inv"
+        mapping[f"{flax_prefix}/Wq2"] = f"{torch_prefix}.euclidean_attention_block.W_q_ev"
+        mapping[f"{flax_prefix}/Wk2"] = f"{torch_prefix}.euclidean_attention_block.W_k_ev"
+
+        # Exchange block
+        mapping[f"params/layers_{i}/exchange_block/mlp_layer_2/kernel"] = f"{torch_prefix}.interaction_block.linear_layer.weight"
+        mapping[f"params/layers_{i}/exchange_block/mlp_layer_2/bias"] = f"{torch_prefix}.interaction_block.linear_layer.bias"
+
+    # Output layers
+    mapping["params/observables_0/energy_dense_regression/kernel"] = "output_block.layers.0.weight"
+    mapping["params/observables_0/energy_dense_regression/bias"] = "output_block.layers.0.bias"
+    mapping["params/observables_0/energy_dense_final/kernel"] = "output_block.final_layer.weight"
+    mapping["params/observables_0/energy_dense_final/bias"] = "output_block.final_layer.bias"
+
+    return mapping
+
+
+
+    
+# Convert parameters from Flax to PyTorch
 
 #save params as params.pkl
 import pickle
@@ -183,9 +262,79 @@ calc = AseCalculatorSparse.create_from_workdir(
     workdir='So3krates-torch/example/',
     from_file=True,
 )
-calc.calculate(
-    mol,
-    properties=['energy']
+
+
+
+
+
+max_l = 3
+model = So3krates(
+    r_max=5.0,
+    num_radial_basis=32,
+    max_l=max_l,
+    features_dim=132,
+    num_att_heads=4,
+    atomic_numbers=mol.get_atomic_numbers(),  # H and O
+    final_mlp_layers=2,  # TODO: check, does the last layer count?
+    num_interactions=cfg.model.num_layers,
+    num_elements=len(z_table),
+    avg_num_neighbors=avg_num_neighbors,
+    message_normalization=cfg.model.message_normalization,
+    seed=42,
+    device=device,
+    trainable_rbf=True,
 )
 
-print(calc.results['energy'])
+
+
+state_dict = model.state_dict()
+mapping = generate_full_flax_to_torch_mapping(
+    num_layers=cfg.model.num_layers
+)
+
+#for k,v in mapping.items():
+#    print(f"{k} -> {v}")
+
+
+for flax_key, torch_key in mapping.items():
+    flax_array = flattened_params[flax_key]
+    flax_array_np = np.array(flax_array)
+    torched = torch.from_numpy(flax_array_np)
+    
+    expected_shape = state_dict[torch_key].shape
+    if flax_array.ndim == 2:
+        torched = torched.T
+    elif flax_array.ndim == 3:
+        torched = torched.permute(0,2,1)
+    
+    if torched.shape != expected_shape:
+        print(f"Shape mismatch for {torch_key}: expected {expected_shape}, got {torched.shape}")
+    
+    if flax_key == "params/feature_embeddings_0/Embed_0/embedding":
+        torched = torched[:,1:]
+    state_dict[torch_key] = torched
+    
+
+
+model.load_state_dict(state_dict, strict=True)
+model.to(device).eval()
+
+
+result = model(batch)
+
+compute = True
+#compute = False
+
+
+if compute:
+    calc.calculate(mol, properties=['energy'])
+
+print("\n\n")
+print("##############  RESULTS  ##############")
+
+print(f"TORCH version: {result['energy'].item():.22f}")
+if compute:
+    print(f"JAX version  : {calc.results['energy']:.22f}")
+    print(f"Difference   : {calc.results['energy'] - result['energy'].item():.22f}")
+    
+    
