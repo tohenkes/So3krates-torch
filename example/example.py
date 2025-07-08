@@ -15,7 +15,7 @@ mol = read('So3krates-torch/example/ala4.xyz')
 r_max = 5.0
 
 z_table = utils.AtomicNumberTable(
-            [int(z) for z in range(1, 120)]
+            [int(z) for z in range(1, 119)]
         )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -64,6 +64,15 @@ model = So3krates(
     seed=42,
     device=device,
     trainable_rbf=True,
+    learn_atomic_type_shifts=True,
+    learn_atomic_type_scales=True,
+    energy_regression_dim=66,  # This is the energy regression dimension
+    layer_normalization_1=True,
+    layer_normalization_2=True,
+    residual_mlp_1=True,
+    residual_mlp_2=True,
+    use_charge_embed=True,
+    use_spin_embed=True,
 )
 model.to(device).eval()
 

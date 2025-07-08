@@ -9,9 +9,9 @@ from so3krates_torch.blocks import (
     euclidean_transformer,
     output_block,
 )
-from so3krates_torch.tools import scatter
 from mace.modules.utils import get_outputs
 from so3krates_torch.blocks import radial_basis
+import math
 
 @compile_mode("script")
 class So3krates(torch.nn.Module):
@@ -27,18 +27,30 @@ class So3krates(torch.nn.Module):
         num_interactions: int,
         num_elements: int,
         avg_num_neighbors: int,
+        energy_regression_dim: Optional[int] = None,
         message_normalization: str = "sqrt_num_features",
         initialize_ev_to_zeros: bool = True,
         radial_basis_fn: str = "gaussian",
         trainable_rbf: bool = False,
+        learn_atomic_type_shifts: bool = False,
+        learn_atomic_type_scales: bool = False,
+        layer_normalization_1: bool = False,
+        layer_normalization_2: bool = False,
+        residual_mlp_1: bool = False,
+        residual_mlp_2: bool = False,
+        use_charge_embed: bool = False,
+        use_spin_embed: bool = False,
         interaction_bias: bool = True,
         cutoff_function: Optional[
             Callable[[torch.Tensor], torch.Tensor]
         ] = CosineCutoff,
+        activation_fn: Type[torch.nn.Module] = torch.nn.SiLU,
         seed: Optional[int] = None,
         device: Union[str, torch.device] = "cpu",
+        dtype: Type[torch.dtype] = torch.float32,
     ):
         super().__init__()
+        torch.set_default_dtype(dtype)
         self.register_buffer(
             "atomic_numbers", torch.tensor(atomic_numbers, dtype=torch.int64)
         )
@@ -58,10 +70,28 @@ class So3krates(torch.nn.Module):
         )
         
         self.inv_feature_embedding = embedding.InvariantEmbedding(
-            in_features=num_elements,
+            num_elements=num_elements,
             out_features=features_dim,
             bias=False,
         )
+        self.num_embeddings = 1
+        self.use_charge_embed = use_charge_embed
+        if self.use_charge_embed:
+            self.charge_embedding = embedding.ChargeSpinEmbedding(
+                num_features=features_dim,
+                activation_fn=activation_fn,
+                num_elements=num_elements,
+            )
+            self.num_embeddings += 1
+        self.use_spin_embed = use_spin_embed
+        if self.use_spin_embed:
+            self.spin_embedding = embedding.ChargeSpinEmbedding(
+                num_features=features_dim,
+                activation_fn=activation_fn,
+                num_elements=num_elements,
+            )
+            self.num_embeddings += 1
+        self.embedding_scale = math.sqrt(self.num_embeddings)
         self.ev_embedding = embedding.EuclideanEmbedding(
             initialization_to_zeros=initialize_ev_to_zeros,
         )
@@ -85,20 +115,29 @@ class So3krates(torch.nn.Module):
                     interaction_bias=interaction_bias,
                     message_normalization=message_normalization,
                     avg_num_neighbors=avg_num_neighbors,
+                    layer_normalization_1=layer_normalization_1,
+                    layer_normalization_2=layer_normalization_2,
+                    residual_mlp_1=residual_mlp_1,
+                    residual_mlp_2=residual_mlp_2,
+                    activation_fn=activation_fn,
                     device=device,
                 )
                 for _ in range(num_interactions)
             ]
         )
 
-        self.output_block = output_block.InvariantOutputHead(
+        self.energy_output_block = output_block.EnergyOutputHead(
             features_dim=features_dim,
+            energy_regression_dim=energy_regression_dim, 
             final_output_features=1,  # TODO: remove hardcoded value
             layers=final_mlp_layers,
             bias=True,
             non_linearity=torch.nn.functional.silu,
             final_non_linearity=False,
             use_non_linearity=True,
+            learn_atomic_type_shifts=learn_atomic_type_shifts,
+            learn_atomic_type_scales=learn_atomic_type_scales,
+            num_elements=num_elements,
         )
 
     def get_representation(
@@ -146,6 +185,21 @@ class So3krates(torch.nn.Module):
         
         ######### EMBEDDING #########
         inv_features = self.inv_feature_embedding(data["node_attrs"])
+        if self.use_charge_embed:
+            inv_features += self.charge_embedding(
+                elements_one_hot=data["node_attrs"],
+                psi=data["total_charge"],
+                batch_segments=data["batch"]
+            )
+        if self.use_spin_embed:
+            #  We use number of unpaired electrons = 2*total_spin.
+            inv_features += self.spin_embedding(
+                elements_one_hot=data["node_attrs"],
+                psi=data["total_spin"] * 2,
+                batch_segments=data["batch"]
+            )
+        # never mentionend in the paper, but done in the JAX code ...
+        inv_features /= self.embedding_scale
         ev_features = self.ev_embedding(
             sh_vectors=sh_vectors,
             cutoffs=cutoffs,
@@ -194,9 +248,10 @@ class So3krates(torch.nn.Module):
         )
         
         ######### OUTPUT #########
-        node_energies = self.output_block(inv_features)
-        total_energy = scatter.scatter_sum(
-            src=node_energies, index=data["batch"], dim=0, dim_size=self.num_graphs
+        total_energy = self.energy_output_block(
+            inv_features,
+            data,
+            num_graphs=self.num_graphs,
         )
         forces, virials, stress, hessian, edge_forces = get_outputs(
             energy=total_energy,

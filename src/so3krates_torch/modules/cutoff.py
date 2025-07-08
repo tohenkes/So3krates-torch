@@ -13,9 +13,7 @@ class CosineCutoff(torch.nn.Module):
 
     def __init__(self, r_max: float):
         super().__init__()
-        self.register_buffer(
-            "r_max", torch.tensor(r_max, dtype=torch.get_default_dtype())
-        )
+        self.r_max = r_max
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 

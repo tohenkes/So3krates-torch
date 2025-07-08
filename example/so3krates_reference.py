@@ -68,24 +68,39 @@ def collect_param_dtypes(params, prefix=''):
     _recurse(params, prefix)
     return dtypes
 
+dtype = 'float64'
+
+if dtype == 'float64':
+    torch.set_default_dtype(torch.float64)
+    jax.config.update("jax_enable_x64", True)
+    dtype = torch.float64
+else:
+    torch.set_default_dtype(torch.float32)
+    jax.config.update("jax_enable_x64", False)
+    dtype = torch.float32
 
 
 #mol = molecule('H2O')
 #mol = read('So3krates-torch/example/aspirin.xyz')
 mol = read('So3krates-torch/example/ala4.xyz')
-r_max = 5.0
+charge = 3
+mol.info["total_charge"] = charge
+mol.info["total_spin"] = 0.5
+mol.info["charge"] = charge
+mol.info["multiplicity"] = 2 * mol.info["total_spin"] + 1
+num_unpaired_electrons = mol.info["total_spin"] * 2
+r_max = 5.
 
 z_table = utils.AtomicNumberTable(
             [int(z) for z in range(1, 119)]
         )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-dtype = 'float32'  # or torch.float64, depending on your model's requirements
-torch.set_default_dtype(getattr(torch, dtype))
 
 keyspec = data.KeySpecification(
-    info_keys={}, arrays_keys={"charges": "Qs"}
+    info_keys={"total_charge":"total_charge","total_spin":"total_spin"}, arrays_keys={"charges": "Qs"}
 )
+
 config = data.config_from_atoms(
     mol, key_specification=keyspec, head_name="default"
 )
@@ -105,11 +120,7 @@ avg_num_neighbors = compute_avg_num_neighbors(
     data_loader
 )
 
-batch = next(iter(data_loader)).to_dict()
-
-
-
-
+batch = next(iter(data_loader))
 cfg = config_dict.ConfigDict()
 cfg.model = config_dict.ConfigDict()
 
@@ -123,10 +134,10 @@ cfg.model.cutoff_fn = 'cosine'
 cfg.model.cutoff = 5.0
 cfg.model.cutoff_lr = None
 cfg.model.degrees = [1,2,3,4]
-cfg.model.residual_mlp_1 = False
-cfg.model.residual_mlp_2 = False
-cfg.model.layer_normalization_1 = False
-cfg.model.layer_normalization_2 = False
+cfg.model.residual_mlp_1 = True
+cfg.model.residual_mlp_2 = True
+cfg.model.layer_normalization_1 = True
+cfg.model.layer_normalization_2 = True
 cfg.model.message_normalization = 'avg_num_neighbors'
 cfg.model.avg_num_neighbors = avg_num_neighbors
 cfg.model.qk_non_linearity = 'identity'
@@ -134,12 +145,12 @@ cfg.model.activation_fn = 'silu'
 cfg.model.layers_behave_like_identity_fn_at_init = False
 cfg.model.output_is_zero_at_init = False
 cfg.model.input_convention = 'positions'
-cfg.model.use_charge_embed = False
-cfg.model.use_spin_embed = False
-cfg.model.energy_regression_dim = cfg.model.num_features
+cfg.model.use_charge_embed = True
+cfg.model.use_spin_embed = True
+cfg.model.energy_regression_dim = 66
 cfg.model.energy_activation_fn = 'silu'
-cfg.model.energy_learn_atomic_type_scales = False
-cfg.model.energy_learn_atomic_type_shifts = False
+cfg.model.energy_learn_atomic_type_scales = True
+cfg.model.energy_learn_atomic_type_shifts = True
 cfg.model.electrostatic_energy_bool = False
 cfg.model.electrostatic_energy_scale = 4.0
 cfg.model.dispersion_energy_bool = False
@@ -165,7 +176,7 @@ model = make_so3krates_sparse_from_config(cfg)
 positions = jnp.array(batch['positions'])
 num_nodes = batch['positions'].shape[0]
 #create fake features by having an array of shape num_nodes, 132
-features = jnp.zeros((num_nodes, 132), dtype=jnp.float32)
+features = jnp.zeros((num_nodes, cfg.model.num_features), dtype=jnp.float32)
 atomic_numbers = jnp.array(mol.get_atomic_numbers())
 batch_segments = jnp.array(batch['batch'])
 node_mask = jnp.ones((num_nodes,), dtype=jnp.bool_)
@@ -181,24 +192,62 @@ inputs = {
     'idx_i': idx_i,
     'idx_j': idx_j,
     'positions': positions,
-    'total_charge': 0
+    'total_charge': jnp.array([charge]),
+    'num_unpaired_electrons': jnp.array([num_unpaired_electrons]),
 }
 
 params = model.init(key,inputs)
 params = unfreeze(params)
-
 flattened_params = flatten_params(params)
+
 #for k, v in flattened_params.items():
-#    print(f"{k}: {v.shape} ({v.size} parameters)")
+#    print(f"{k}: {v.shape} ({v.size} elements)")
 
 
-def generate_full_flax_to_torch_mapping(num_layers: int):
+
+def generate_full_flax_to_torch_mapping(
+    cfg
+    ):
+    num_layers = cfg.model.num_layers
+    layer_norm_1 = cfg.model.layer_normalization_1
+    layer_norm_2 = cfg.model.layer_normalization_2
+    residual_mlp_1 = cfg.model.residual_mlp_1
+    residual_mlp_2 = cfg.model.residual_mlp_2
+    learn_atomic_type_shifts = cfg.model.energy_learn_atomic_type_shifts
+    learn_atomic_type_scales = cfg.model.energy_learn_atomic_type_scales
+    use_charge_embed = cfg.model.use_charge_embed
+    use_spin_embed = cfg.model.use_spin_embed
     mapping = {}
 
     # Embedding layers
     mapping["params/feature_embeddings_0/Embed_0/embedding"] = "inv_feature_embedding.embedding.weight"
     mapping["params/geometry_embeddings_0/rbf_fn/centers"] = "radial_embedding.radial_basis_fn.centers"
     mapping["params/geometry_embeddings_0/rbf_fn/widths"] = "radial_embedding.radial_basis_fn.widths"
+    if use_charge_embed and not use_spin_embed:
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"] = "charge_embedding.Wq.weight"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"] = "charge_embedding.Wk"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"] = "charge_embedding.Wv"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"] = "charge_embedding.mlp.1.weight"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"] = "charge_embedding.mlp.3.weight"
+    elif use_spin_embed and not use_charge_embed:
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"] = "spin_embedding.Wq.weight"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"] = "spin_embedding.Wk"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"] = "spin_embedding.Wv"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"] = "spin_embedding.mlp.1.weight"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"] = "spin_embedding.mlp.3.weight"
+    elif use_charge_embed and use_spin_embed:
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"] = "charge_embedding.Wq.weight"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"] = "charge_embedding.Wk"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"] = "charge_embedding.Wv"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"] = "charge_embedding.mlp.1.weight"
+        mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"] = "charge_embedding.mlp.3.weight"
+        mapping["params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_0/embedding"] = "spin_embedding.Wq.weight"
+        mapping["params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_1/embedding"] = "spin_embedding.Wk"
+        mapping["params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_2/embedding"] = "spin_embedding.Wv"
+        mapping["params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"] = "spin_embedding.mlp.1.weight"
+        mapping["params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"] = "spin_embedding.mlp.3.weight"
+
+
 
     # Per-layer transformer mappings
     for i in range(num_layers):
@@ -240,11 +289,35 @@ def generate_full_flax_to_torch_mapping(num_layers: int):
         mapping[f"params/layers_{i}/exchange_block/mlp_layer_2/kernel"] = f"{torch_prefix}.interaction_block.linear_layer.weight"
         mapping[f"params/layers_{i}/exchange_block/mlp_layer_2/bias"] = f"{torch_prefix}.interaction_block.linear_layer.bias"
 
+        # Layer normalization
+        if layer_norm_1:
+            mapping[f"params/layers_{i}/layer_normalization_1/scale"] = f"{torch_prefix}.layer_norm_inv_1.weight"
+            mapping[f"params/layers_{i}/layer_normalization_1/bias"] = f"{torch_prefix}.layer_norm_inv_1.bias"
+        if layer_norm_2:
+            mapping[f"params/layers_{i}/layer_normalization_2/scale"] = f"{torch_prefix}.layer_norm_inv_2.weight"
+            mapping[f"params/layers_{i}/layer_normalization_2/bias"] = f"{torch_prefix}.layer_norm_inv_2.bias"
+        
+        # Residual MLPs
+        if residual_mlp_1:
+            mapping[f"params/layers_{i}/res_mlp_1_layer_1/kernel"] = f"{torch_prefix}.residual_mlp_1.1.weight"
+            mapping[f"params/layers_{i}/res_mlp_1_layer_1/bias"] = f"{torch_prefix}.residual_mlp_1.1.bias"
+            mapping[f"params/layers_{i}/res_mlp_1_layer_2/kernel"] = f"{torch_prefix}.residual_mlp_1.3.weight"
+            mapping[f"params/layers_{i}/res_mlp_1_layer_2/bias"] = f"{torch_prefix}.residual_mlp_1.3.bias"
+        if residual_mlp_2:
+            mapping[f"params/layers_{i}/res_mlp_2_layer_1/kernel"] = f"{torch_prefix}.residual_mlp_2.1.weight"
+            mapping[f"params/layers_{i}/res_mlp_2_layer_1/bias"] = f"{torch_prefix}.residual_mlp_2.1.bias"
+            mapping[f"params/layers_{i}/res_mlp_2_layer_2/kernel"] = f"{torch_prefix}.residual_mlp_2.3.weight"
+            mapping[f"params/layers_{i}/res_mlp_2_layer_2/bias"] = f"{torch_prefix}.residual_mlp_2.3.bias"
+            
     # Output layers
-    mapping["params/observables_0/energy_dense_regression/kernel"] = "output_block.layers.0.weight"
-    mapping["params/observables_0/energy_dense_regression/bias"] = "output_block.layers.0.bias"
-    mapping["params/observables_0/energy_dense_final/kernel"] = "output_block.final_layer.weight"
-    mapping["params/observables_0/energy_dense_final/bias"] = "output_block.final_layer.bias"
+    mapping["params/observables_0/energy_dense_regression/kernel"] = "energy_output_block.layers.0.weight"
+    mapping["params/observables_0/energy_dense_regression/bias"] = "energy_output_block.layers.0.bias"
+    mapping["params/observables_0/energy_dense_final/kernel"] = "energy_output_block.final_layer.weight"
+    mapping["params/observables_0/energy_dense_final/bias"] = "energy_output_block.final_layer.bias"
+    if learn_atomic_type_shifts:
+        mapping["params/observables_0/energy_offset"] = "energy_output_block.energy_shifts.weight"
+    if learn_atomic_type_scales:
+        mapping["params/observables_0/atomic_scales"] = "energy_output_block.energy_scales.weight"
 
     return mapping
 
@@ -283,44 +356,71 @@ model = So3krates(
     seed=42,
     device=device,
     trainable_rbf=True,
+    dtype=dtype,
+    learn_atomic_type_shifts=cfg.model.energy_learn_atomic_type_shifts,
+    learn_atomic_type_scales=cfg.model.energy_learn_atomic_type_scales,
+    energy_regression_dim=cfg.model.energy_regression_dim,
+    layer_normalization_1=cfg.model.layer_normalization_1, 
+    layer_normalization_2=cfg.model.layer_normalization_2, 
+    residual_mlp_1=cfg.model.residual_mlp_1,
+    residual_mlp_2=cfg.model.residual_mlp_2,
+    use_charge_embed=cfg.model.use_charge_embed,
+    use_spin_embed=cfg.model.use_spin_embed,
 )
 
 
 
 state_dict = model.state_dict()
 mapping = generate_full_flax_to_torch_mapping(
-    num_layers=cfg.model.num_layers
+    cfg=cfg
 )
 
 #for k,v in mapping.items():
 #    print(f"{k} -> {v}")
 
-
+embeddings = [
+    "inv_feature_embedding.embedding.weight",
+    "charge_embedding.Wq.weight",
+    "spin_embedding.Wq.weight",
+]
+special_embeddings = [
+    "charge_embedding.Wk",
+    "charge_embedding.Wv",
+    "spin_embedding.Wk",
+    "spin_embedding.Wv",
+]
 for flax_key, torch_key in mapping.items():
     flax_array = flattened_params[flax_key]
     flax_array_np = np.array(flax_array)
     torched = torch.from_numpy(flax_array_np)
     
     expected_shape = state_dict[torch_key].shape
-    if flax_array.ndim == 2:
+    if flax_array.ndim == 2 and torch_key not in special_embeddings:
         torched = torched.T
     elif flax_array.ndim == 3:
         torched = torched.permute(0,2,1)
     
+    
+    if torch_key in embeddings:
+        torched = torched[:,1:]
+    if (
+        flax_key == "params/observables_0/energy_offset" or flax_key == "params/observables_0/atomic_scales"):
+        torched = torched[1:].unsqueeze(0) 
+
     if torched.shape != expected_shape:
         print(f"Shape mismatch for {torch_key}: expected {expected_shape}, got {torched.shape}")
-    
-    if flax_key == "params/feature_embeddings_0/Embed_0/embedding":
-        torched = torched[:,1:]
     state_dict[torch_key] = torched
     
 
 
 model.load_state_dict(state_dict, strict=True)
+
+
 model.to(device).eval()
-
-
-result = model(batch)
+#compiled_model = torch.compile(model)
+batch_torch_model = batch.to(device)
+batch_torch_model = batch_torch_model.to_dict()
+result = model(batch_torch_model)
 
 compute = True
 #compute = False
@@ -332,9 +432,9 @@ if compute:
 print("\n\n")
 print("##############  RESULTS  ##############")
 
-print(f"TORCH version: {result['energy'].item():.10f}")
+print(f"TORCH version: {result['energy'].item():.6f}")
 if compute:
-    print(f"JAX version  : {calc.results['energy']:.10f}")
-    print(f"Difference   : {calc.results['energy'] - result['energy'].item():.10f}")
+    print(f"JAX version  : {calc.results['energy']:.6f}")
+    print(f"Difference   : {calc.results['energy'] - result['energy'].item():.6f}")
     
     

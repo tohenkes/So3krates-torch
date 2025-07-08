@@ -1,15 +1,14 @@
 {
     "data": {
-        "avg_num_neighbors": 25.428571701049805
+        "avg_num_neighbors": 25.428571428571427
     },
     "model": {
         "activation_fn": "silu",
-        "avg_num_neighbors": 25.428571701049805,
+        "avg_num_neighbors": 25.428571428571427,
         "cutoff": 5.0,
         "cutoff_fn": "cosine",
         "cutoff_lr": null,
         "degrees": [
-            0,
             1,
             2,
             3,
@@ -21,16 +20,16 @@
         "electrostatic_energy_bool": false,
         "electrostatic_energy_scale": 4.0,
         "energy_activation_fn": "silu",
-        "energy_learn_atomic_type_scales": false,
-        "energy_learn_atomic_type_shifts": false,
-        "energy_regression_dim": 200,
+        "energy_learn_atomic_type_scales": true,
+        "energy_learn_atomic_type_shifts": true,
+        "energy_regression_dim": 66,
         "input_convention": "positions",
-        "layer_normalization_1": false,
-        "layer_normalization_2": false,
+        "layer_normalization_1": true,
+        "layer_normalization_2": true,
         "layers_behave_like_identity_fn_at_init": false,
         "message_normalization": "avg_num_neighbors",
-        "num_features": 200,
-        "num_features_head": 50,
+        "num_features": 132,
+        "num_features_head": 32,
         "num_heads": 4,
         "num_layers": 3,
         "num_radial_basis_fn": 32,
@@ -38,11 +37,11 @@
         "output_is_zero_at_init": false,
         "qk_non_linearity": "identity",
         "radial_basis_fn": "gaussian",
-        "residual_mlp_1": false,
-        "residual_mlp_2": false,
+        "residual_mlp_1": true,
+        "residual_mlp_2": true,
         "return_representations_bool": false,
-        "use_charge_embed": false,
-        "use_spin_embed": false,
+        "use_charge_embed": true,
+        "use_spin_embed": true,
         "zbl_repulsion_bool": false
     },
     "neighborlist_format_lr": "sparse"

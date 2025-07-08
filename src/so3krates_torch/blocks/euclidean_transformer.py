@@ -16,14 +16,17 @@ class EuclideanTransformer(torch.nn.Module):
         num_heads: int,
         features_dim: int,
         num_radial_basis: int,
+        activation_fn: Type[torch.nn.Module] = torch.nn.SiLU,
         interaction_bias: bool = True,
         message_normalization: str = "sqrt_num_features",
         avg_num_neighbors: Optional[int] = None,
         device: Union[str, torch.device] = "cpu",
         filter_net_inv_layers: int = 2,
-        filter_net_inv_non_linearity: Type[torch.nn.Module] = torch.nn.SiLU,
         filter_net_ev_layers: int = 2,
-        filter_net_ev_non_linearity: Type[torch.nn.Module] = torch.nn.SiLU,
+        layer_normalization_1: bool = False,
+        layer_normalization_2: bool = False,
+        residual_mlp_1: bool = False,
+        residual_mlp_2: bool = False,
     ):
         super().__init__()
 
@@ -32,7 +35,7 @@ class EuclideanTransformer(torch.nn.Module):
             features_dim=features_dim,
             num_radial_basis=num_radial_basis,
             num_layers=filter_net_inv_layers,
-            non_linearity=filter_net_inv_non_linearity,
+            non_linearity=activation_fn,
         )
         
         self.filter_net_ev = FilterNet(
@@ -40,7 +43,7 @@ class EuclideanTransformer(torch.nn.Module):
             features_dim=features_dim,
             num_radial_basis=num_radial_basis,
             num_layers=filter_net_ev_layers,
-            non_linearity=filter_net_ev_non_linearity,
+            non_linearity=activation_fn,
         )
         
         self.euclidean_attention_block = EuclideanAttentionBlock(
@@ -59,7 +62,55 @@ class EuclideanTransformer(torch.nn.Module):
             bias=interaction_bias,
             device=device,
         )
-
+        
+        # The following blocks have been mentioned in the SO3LR paper
+        # 10.26434/chemrxiv-2024-bdfr0-v3 
+        self.layer_normalization_1 = layer_normalization_1
+        if layer_normalization_1:
+            self.layer_norm_inv_1 = torch.nn.LayerNorm(
+                normalized_shape=features_dim,
+                eps=1e-6,  # flax default is 1e-6 while pytorch default is 1e-5
+            )
+        self.layer_normalization_2 = layer_normalization_2
+        if layer_normalization_2:
+            self.layer_norm_inv_2 = torch.nn.LayerNorm(
+                normalized_shape=features_dim,
+                eps=1e-6,  # flax default is 1e-6 while pytorch default is 1e-5
+            )
+            
+        self.residual_mlp_1 = residual_mlp_1
+        if residual_mlp_1:
+            self.residual_mlp_1 = torch.nn.Sequential(
+                activation_fn(),
+                torch.nn.Linear(
+                    in_features=features_dim,
+                    out_features=features_dim,
+                ),
+                activation_fn(),
+                torch.nn.Linear(
+                    in_features=features_dim,
+                    out_features=features_dim,
+                ),
+            )
+            self.run_residual_mlp_1 = lambda x: self.residual_mlp_1(x) + x
+            
+        self.residual_mlp_2 = residual_mlp_2
+        if residual_mlp_2:
+            self.residual_mlp_2 = torch.nn.Sequential(
+                activation_fn(),
+                torch.nn.Linear(
+                    in_features=features_dim,
+                    out_features=features_dim,
+                ),
+                activation_fn(),
+                torch.nn.Linear(
+                    in_features=features_dim,
+                    out_features=features_dim,
+                ),
+            )
+            self.run_residual_mlp_2 = lambda x: self.residual_mlp_2(x) + x
+            
+        
     def forward(
         self,
         inv_features: torch.Tensor,
@@ -80,14 +131,28 @@ class EuclideanTransformer(torch.nn.Module):
             sh_vectors=sh_vectors,
             cutoffs=cutoffs,
         )
+
         att_inv_features = inv_features + d_att_inv_features
         att_ev_features = ev_features + d_att_ev_features
+        
+        if self.layer_normalization_1:
+            att_inv_features = self.layer_norm_inv_1(att_inv_features)
+        
+        if self.residual_mlp_1:
+            att_inv_features = self.run_residual_mlp_1(att_inv_features)
         d_inv_features, d_ev_features = self.interaction_block(
             att_inv_features, att_ev_features
         )
         # Eq. 26, 27 in https://doi.org/10.1038/s41467-024-50620-6
         new_inv_features = att_inv_features + d_inv_features
         new_ev_features = att_ev_features + d_ev_features
+        
+        if self.residual_mlp_2:
+            new_inv_features = self.run_residual_mlp_2(new_inv_features)
+        
+        if self.layer_normalization_2:
+            new_inv_features = self.layer_norm_inv_2(new_inv_features)
+
         return new_inv_features, new_ev_features
 
 
