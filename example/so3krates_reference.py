@@ -17,7 +17,32 @@ from mlff.sph_ops import make_l0_contraction_fn
 from so3krates_torch.blocks.so3_conv_invariants import SO3ConvolutionInvariants
 from so3krates_torch.modules.spherical_harmonics import RealSphericalHarmonics
 
+def atoms_to_batch(
+        atoms,
+        device,
 
+        ):
+    keyspec = data.KeySpecification(
+    info_keys={"total_charge":"total_charge","total_spin":"total_spin"}, arrays_keys={"charges": "Qs"}
+    )
+    config = data.config_from_atoms(
+        atoms, key_specification=keyspec, head_name="default"
+    )
+    data_loader = torch_geometric.dataloader.DataLoader(
+        dataset=[
+            data.AtomicData.from_config(
+                config,
+                z_table=z_table,
+                cutoff=r_max,
+                heads=["Default"],
+            )
+        ],
+        batch_size=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    batch = next(iter(data_loader)).to(device)
+    return batch
 
 def print_param_shapes(params, prefix=''):
     if isinstance(params, dict) or isinstance(params, flax.core.frozen_dict.FrozenDict):
@@ -68,6 +93,8 @@ def collect_param_dtypes(params, prefix=''):
     _recurse(params, prefix)
     return dtypes
 
+
+
 dtype = 'float64'
 
 if dtype == 'float64':
@@ -82,7 +109,8 @@ else:
 
 #mol = molecule('H2O')
 #mol = read('So3krates-torch/example/aspirin.xyz')
-mol = read('So3krates-torch/example/ala4.xyz')
+#mol = read('So3krates-torch/example/ala4.xyz')
+mol = read('So3krates-torch/example/water_64.xyz')
 charge = 3
 mol.info["total_charge"] = charge
 mol.info["total_spin"] = 0.5
@@ -202,7 +230,7 @@ flattened_params = flatten_params(params)
 
 #for k, v in flattened_params.items():
 #    print(f"{k}: {v.shape} ({v.size} elements)")
-
+#exit()
 
 
 def generate_full_flax_to_torch_mapping(
@@ -417,9 +445,10 @@ model.load_state_dict(state_dict, strict=True)
 
 
 model.to(device).eval()
-#compiled_model = torch.compile(model)
+#model = torch.compile(model)
 batch_torch_model = batch.to(device)
 batch_torch_model = batch_torch_model.to_dict()
+batch_torch_model["positions"].requires_grad_(True)
 result = model(batch_torch_model)
 
 compute = True
@@ -427,14 +456,58 @@ compute = True
 
 
 if compute:
-    calc.calculate(mol, properties=['energy'])
+    calc.calculate(mol, properties=['energy', 'forces'],)
 
 print("\n\n")
 print("##############  RESULTS  ##############")
-
+print("Energy")
 print(f"TORCH version: {result['energy'].item():.6f}")
 if compute:
     print(f"JAX version  : {calc.results['energy']:.6f}")
     print(f"Difference   : {calc.results['energy'] - result['energy'].item():.6f}")
-    
-    
+
+print("\n\n")
+print("Forces")
+print("TORCH version: ", result['forces'][0,:])    
+print("JAX version  : ", calc.results['forces'][0,:])
+print(f"Difference   :  {np.abs(calc.results['forces'] - np.array(result['forces'])).mean().item():.6f}")
+print("\n\n")
+
+inference = True
+if inference:
+    print("Inference timings")
+    import time
+    num_runs = 100
+    # Warmup run
+    model(batch_torch_model)
+    calc.calculate(mol, properties=['energy', 'forces'],)
+
+    time_start_torch = time.time()
+    for i in range(num_runs):
+        batch_temp = atoms_to_batch(
+            mol,
+            device=device,
+        ).to_dict()
+        batch_temp["positions"].requires_grad_(True)
+        result = model(batch_temp)
+    time_end_torch = time.time()
+    timings_torch = time_end_torch - time_start_torch
+    print('######### Torch Model #########')
+    print(f"Time taken for {num_runs} iterations: {timings_torch:.4f} seconds")
+    print(f'Average time per iteration: {(timings_torch) / num_runs:.4f} seconds')
+    print(f'Iterations per second: {num_runs / (timings_torch):.2f}')
+    time_start_jax = time.time()
+    for i in range(num_runs):
+        calc.calculate(mol, properties=['energy', 'forces'],)
+    time_end_jax = time.time()
+    timing_jax = time_end_jax - time_start_jax
+    print('######### JAX Model #########')
+    print(f"Time taken for {num_runs} iterations: {timing_jax:.4f} seconds")
+    print(f'Average time per iteration: {(timing_jax) / num_runs:.4f} seconds')
+    print(f'Iterations per second: {num_runs / (timing_jax):.2f}')
+    jax_faster = timing_jax < timings_torch
+    if jax_faster:
+        print(f"The JAX model is {timings_torch / timing_jax:.2f} times faster than the Torch model.")
+    else:
+        print(f"The JAX model is {timing_jax / timings_torch:.2f} times slower than the Torch model.")
+

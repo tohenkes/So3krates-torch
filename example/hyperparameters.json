@@ -1,10 +1,10 @@
 {
     "data": {
-        "avg_num_neighbors": 25.428571428571427
+        "avg_num_neighbors": 52.6875
     },
     "model": {
         "activation_fn": "silu",
-        "avg_num_neighbors": 25.428571428571427,
+        "avg_num_neighbors": 52.6875,
         "cutoff": 5.0,
         "cutoff_fn": "cosine",
         "cutoff_lr": null,

@@ -77,10 +77,11 @@ model = So3krates(
 model.to(device).eval()
 
 # print model parameters
-print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
-for name, param in model.named_parameters():
-    if param.requires_grad:
-        print(f"{name}: {param.shape} ({param.numel()} parameters)")
+if False:
+    print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"{name}: {param.shape} ({param.numel()} parameters)")
 
 # save params:
 torch.save(
@@ -89,9 +90,10 @@ torch.save(
     
 )
 
+batch["positions"].requires_grad_(True)
 
 #scripted_model = jit.compile(model)
-compiled_model = torch.compile(model)
+model = torch.compile(model)
 
 batch= batch.to_dict()
 result = model(batch)
