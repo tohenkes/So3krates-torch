@@ -121,6 +121,7 @@ class ChargeSpinEmbedding(torch.nn.Module):
             elements_one_hot: torch.Tensor,
             psi: torch.Tensor,
             batch_segments: torch.Tensor,
+            num_graphs: Optional[int] = None,
             ) -> torch.Tensor:
         """
         Computes the charge-spin embedding as described in
@@ -137,16 +138,18 @@ class ChargeSpinEmbedding(torch.nn.Module):
         torch.set_printoptions(precision=8, sci_mode=False)
         q = self.Wq(elements_one_hot)
         idx = torch.where(psi < 0, torch.tensor(1, device=psi.device), torch.tensor(0, device=psi.device))
-        k = self.Wk[idx] # Unsqueeze to match the batch dimension
-        v = self.Wv[idx]
+        k = self.Wk[idx][batch_segments] 
+        v = self.Wv[idx][batch_segments]
         q_x_k = (q * k).sum(dim=-1) / self.sqrt_dim
         y = torch.nn.functional.softplus(q_x_k)
         denominator = scatter.scatter_sum(
             src=y,
             index=batch_segments,
             dim=0,
+            dim_size=num_graphs
         )
-        a = (psi * y / denominator)
+
+        a = (psi[batch_segments] * y / denominator[batch_segments])
         e_psi = self.run_residual_mlp(
             a[:,None] * v
         )

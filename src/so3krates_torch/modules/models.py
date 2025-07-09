@@ -189,14 +189,16 @@ class So3krates(torch.nn.Module):
             inv_features += self.charge_embedding(
                 elements_one_hot=data["node_attrs"],
                 psi=data["total_charge"],
-                batch_segments=data["batch"]
+                batch_segments=data["batch"],
+                num_graphs=self.num_graphs,
             )
         if self.use_spin_embed:
             #  We use number of unpaired electrons = 2*total_spin.
             inv_features += self.spin_embedding(
                 elements_one_hot=data["node_attrs"],
                 psi=data["total_spin"] * 2,
-                batch_segments=data["batch"]
+                batch_segments=data["batch"],
+                num_graphs=self.num_graphs,
             )
         # never mentionend in the paper, but done in the JAX code ...
         inv_features /= self.embedding_scale
