@@ -339,6 +339,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             src=scaled_neighbors_inv,
             index=receivers,
             dim=0,
+            dim_size=inv_features.shape[0],  # number of nodes
         )
         d_att_inv_features = d_h_att_inv_features.view(-1, self.inv_features_dim)
         
@@ -352,6 +353,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             src=scaled_neighbors_ev,
             index=receivers,
             dim=0,
+            dim_size=ev_features.shape[0],  # number of nodes
         )
         return d_att_inv_features, d_att_ev_features
 

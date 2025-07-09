@@ -445,7 +445,7 @@ model.load_state_dict(state_dict, strict=True)
 
 
 model.to(device).eval()
-#model = torch.compile(model)
+model = torch.compile(model)
 batch_torch_model = batch.to(device)
 batch_torch_model = batch_torch_model.to_dict()
 batch_torch_model["positions"].requires_grad_(True)
@@ -470,10 +470,10 @@ print("\n\n")
 print("Forces")
 print("TORCH version: ", result['forces'][0,:])    
 print("JAX version  : ", calc.results['forces'][0,:])
-print(f"Difference   :  {np.abs(calc.results['forces'] - np.array(result['forces'])).mean().item():.6f}")
+print(f"Difference   :  {np.abs(calc.results['forces'] - np.array(result['forces'].cpu())).mean().item():.6f}")
 print("\n\n")
 
-inference = True
+inference =False
 if inference:
     print("Inference timings")
     import time

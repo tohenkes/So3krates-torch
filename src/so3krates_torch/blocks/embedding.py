@@ -51,9 +51,8 @@ class EuclideanEmbedding(torch.nn.Module):
         receivers: torch.Tensor,
         inv_avg_num_neighbors: float,
     ) -> torch.Tensor:
-
+        num_nodes = torch.unique(receivers).numel()
         if self.initialization_to_zeros:
-            num_nodes = torch.unique(receivers).numel()
             ev_embedding = torch.zeros(
                 (num_nodes, sh_vectors.shape[1]),
                 dtype=sh_vectors.dtype,
@@ -67,6 +66,7 @@ class EuclideanEmbedding(torch.nn.Module):
                     src=scaled_neighbors,
                     index=receivers,
                     dim=0,
+                    dim_size=num_nodes
                 )
                 * inv_avg_num_neighbors
             )
@@ -84,6 +84,8 @@ class ChargeSpinEmbedding(torch.nn.Module):
             num_features: int,
             activation_fn: Callable = torch.nn.SiLU,
             num_elements: int = 118,
+            eps: float = 1e-8,
+            device: Optional[torch.device] = None,
             ):
         super().__init__()
 
@@ -115,6 +117,11 @@ class ChargeSpinEmbedding(torch.nn.Module):
             torch.nn.Linear(num_features, num_features, bias=False),
         )
         self.run_residual_mlp = lambda x: x + self.mlp(x)
+        self.eps = torch.tensor(
+            eps,
+            dtype=torch.get_default_dtype(),
+            device=device
+        )
 
     def forward(
             self,
@@ -135,9 +142,8 @@ class ChargeSpinEmbedding(torch.nn.Module):
         Returns:
             torch.Tensor: The charge-spin embedding for the input.
         """
-        torch.set_printoptions(precision=8, sci_mode=False)
         q = self.Wq(elements_one_hot)
-        idx = torch.where(psi < 0, torch.tensor(1, device=psi.device), torch.tensor(0, device=psi.device))
+        idx = (psi // torch.inf).type(torch.int)
         k = self.Wk[idx][batch_segments] 
         v = self.Wv[idx][batch_segments]
         q_x_k = (q * k).sum(dim=-1) / self.sqrt_dim
@@ -147,8 +153,7 @@ class ChargeSpinEmbedding(torch.nn.Module):
             index=batch_segments,
             dim=0,
             dim_size=num_graphs
-        )
-
+        ) + self.eps
         a = (psi[batch_segments] * y / denominator[batch_segments])
         e_psi = self.run_residual_mlp(
             a[:,None] * v

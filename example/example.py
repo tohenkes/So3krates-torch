@@ -8,6 +8,11 @@ from e3nn.util import jit
 from ase.io import read
 from mace.modules.utils import compute_avg_num_neighbors
 from mace.calculators import mace_mp
+from so3krates_torch.tools.compile import prepare
+
+def nan_hook(module, input, output):
+    if torch.isnan(output).any():
+        print(f"NaN in module: {module.__class__.__name__}")
 
 mol = molecule('H2O')
 mol = read('So3krates-torch/example/aspirin.xyz')
@@ -18,6 +23,7 @@ z_table = utils.AtomicNumberTable(
             [int(z) for z in range(1, 119)]
         )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f"Using device: {device}")
 
 dtype = 'float32'  # or torch.float64, depending on your model's requirements
 torch.set_default_dtype(getattr(torch, dtype))
@@ -75,7 +81,11 @@ model = So3krates(
     use_spin_embed=True,
 )
 model.to(device).eval()
-
+def print_hook(name):
+    def hook(m, inp, out):
+        print(f"{name}: mean={out}")
+    return hook
+#model.register_forward_hook(print_hook("some_block"))
 # print model parameters
 if False:
     print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
@@ -91,14 +101,17 @@ torch.save(
 )
 
 batch["positions"].requires_grad_(True)
-
+torch._dynamo.config.suppress_errors = False
 #scripted_model = jit.compile(model)
+result = model(batch)
+print(f"Not compiled: Energy: {result['energy'].item():.4f}")
+print("COMPILING...")
 model = torch.compile(model)
 
 batch= batch.to_dict()
 result = model(batch)
 
-print(f"{result['energy'].item():.4f}")
+print(f"Compiled: {result['energy'].item():.4f}")
 
 exit()
 time_start = time.time()

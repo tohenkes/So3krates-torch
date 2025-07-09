@@ -87,6 +87,7 @@ class EnergyOutputHead(torch.nn.Module):
         total_energy = scatter.scatter_sum(
             src=atomic_energies,
             index=data["batch"],
-            dim=0, dim_size=num_graphs
+            dim=0, 
+            dim_size=num_graphs
         )
         return total_energy
