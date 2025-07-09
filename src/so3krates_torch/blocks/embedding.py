@@ -116,8 +116,6 @@ class ChargeSpinEmbedding(torch.nn.Module):
         )
         self.run_residual_mlp = lambda x: x + self.mlp(x)
 
-        self.choose_idx = lambda x: int(x < 0)
-
     def forward(
             self,
             elements_one_hot: torch.Tensor,
@@ -138,8 +136,8 @@ class ChargeSpinEmbedding(torch.nn.Module):
         """
         torch.set_printoptions(precision=8, sci_mode=False)
         q = self.Wq(elements_one_hot)
-        idx = self.choose_idx(psi.item())
-        k = self.Wk[idx].unsqueeze(0)
+        idx = torch.where(psi < 0, torch.tensor(1, device=psi.device), torch.tensor(0, device=psi.device))
+        k = self.Wk[idx] # Unsqueeze to match the batch dimension
         v = self.Wv[idx]
         q_x_k = (q * k).sum(dim=-1) / self.sqrt_dim
         y = torch.nn.functional.softplus(q_x_k)
@@ -148,10 +146,9 @@ class ChargeSpinEmbedding(torch.nn.Module):
             index=batch_segments,
             dim=0,
         )
-        
         a = (psi * y / denominator)
         e_psi = self.run_residual_mlp(
-            a[:,None] * v[None,:]
+            a[:,None] * v
         )
         return e_psi
 
