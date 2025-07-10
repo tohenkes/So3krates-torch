@@ -84,8 +84,6 @@ class ChargeSpinEmbedding(torch.nn.Module):
             num_features: int,
             activation_fn: Callable = torch.nn.SiLU,
             num_elements: int = 118,
-            eps: float = 1e-8,
-            device: Optional[torch.device] = None,
             ):
         super().__init__()
 
@@ -117,18 +115,15 @@ class ChargeSpinEmbedding(torch.nn.Module):
             torch.nn.Linear(num_features, num_features, bias=False),
         )
         self.run_residual_mlp = lambda x: x + self.mlp(x)
-        self.eps = torch.tensor(
-            eps,
-            dtype=torch.get_default_dtype(),
-            device=device
-        )
-
+    
+    @torch.compiler.disable()
     def forward(
             self,
             elements_one_hot: torch.Tensor,
             psi: torch.Tensor,
             batch_segments: torch.Tensor,
             num_graphs: Optional[int] = None,
+            eps: float = 1e-6,
             ) -> torch.Tensor:
         """
         Computes the charge-spin embedding as described in
@@ -153,13 +148,11 @@ class ChargeSpinEmbedding(torch.nn.Module):
             index=batch_segments,
             dim=0,
             dim_size=num_graphs
-        ) + self.eps
+        ) + eps
         a = (psi[batch_segments] * y / denominator[batch_segments])
         e_psi = self.run_residual_mlp(
-            a[:,None] * v
+            a[:, None] * v
         )
-        #print(psi,e_psi[0,:10])
         return e_psi
-
 
 

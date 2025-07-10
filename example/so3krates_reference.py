@@ -445,7 +445,7 @@ model.load_state_dict(state_dict, strict=True)
 
 
 model.to(device).eval()
-model = torch.compile(model)
+compiled_model = torch.compile(model)
 batch_torch_model = batch.to(device)
 batch_torch_model = batch_torch_model.to_dict()
 batch_torch_model["positions"].requires_grad_(True)
@@ -480,8 +480,10 @@ if inference:
     num_runs = 100
     # Warmup run
     model(batch_torch_model)
+    compiled_model(batch_torch_model)
     calc.calculate(mol, properties=['energy', 'forces'],)
-
+    
+    print('######### uncompiled Torch Model #########')
     time_start_torch = time.time()
     for i in range(num_runs):
         batch_temp = atoms_to_batch(
@@ -492,22 +494,37 @@ if inference:
         result = model(batch_temp)
     time_end_torch = time.time()
     timings_torch = time_end_torch - time_start_torch
-    print('######### Torch Model #########')
     print(f"Time taken for {num_runs} iterations: {timings_torch:.4f} seconds")
     print(f'Average time per iteration: {(timings_torch) / num_runs:.4f} seconds')
-    print(f'Iterations per second: {num_runs / (timings_torch):.2f}')
+    print(f'Iterations per second: {num_runs / (timings_torch):.2f}\n')
+    
+    print('######### Compiled Torch Model #########')
+    time_start_torch = time.time()
+    for i in range(num_runs):
+        batch_temp = atoms_to_batch(
+            mol,
+            device=device,
+        ).to_dict()
+        batch_temp["positions"].requires_grad_(True)
+        result = compiled_model(batch_temp)
+    time_end_torch = time.time()
+    timings_torch = time_end_torch - time_start_torch
+    print(f"Time taken for {num_runs} iterations: {timings_torch:.4f} seconds")
+    print(f'Average time per iteration: {(timings_torch) / num_runs:.4f} seconds')
+    print(f'Iterations per second: {num_runs / (timings_torch):.2f}\n')
+    
+    print('######### JAX Model #########')
     time_start_jax = time.time()
     for i in range(num_runs):
         calc.calculate(mol, properties=['energy', 'forces'],)
     time_end_jax = time.time()
     timing_jax = time_end_jax - time_start_jax
-    print('######### JAX Model #########')
     print(f"Time taken for {num_runs} iterations: {timing_jax:.4f} seconds")
     print(f'Average time per iteration: {(timing_jax) / num_runs:.4f} seconds')
-    print(f'Iterations per second: {num_runs / (timing_jax):.2f}')
+    print(f'Iterations per second: {num_runs / (timing_jax):.2f}\n')
     jax_faster = timing_jax < timings_torch
     if jax_faster:
-        print(f"The JAX model is {timings_torch / timing_jax:.2f} times faster than the Torch model.")
+        print(f"The JAX model is {timings_torch / timing_jax:.2f} times faster than the compiled Torch model.")
     else:
-        print(f"The JAX model is {timing_jax / timings_torch:.2f} times slower than the Torch model.")
+        print(f"The JAX model is {timing_jax / timings_torch:.2f} times slower than the compiled Torch model.")
 

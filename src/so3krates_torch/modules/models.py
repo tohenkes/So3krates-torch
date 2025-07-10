@@ -81,7 +81,6 @@ class So3krates(torch.nn.Module):
                 num_features=features_dim,
                 activation_fn=activation_fn,
                 num_elements=num_elements,
-                device=device,
             )
             self.num_embeddings += 1
         self.use_spin_embed = use_spin_embed
@@ -90,7 +89,6 @@ class So3krates(torch.nn.Module):
                 num_features=features_dim,
                 activation_fn=activation_fn,
                 num_elements=num_elements,
-                device=device,
             )
             self.num_embeddings += 1
         self.embedding_scale = math.sqrt(self.num_embeddings)
