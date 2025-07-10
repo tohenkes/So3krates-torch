@@ -17,7 +17,14 @@ def nan_hook(module, input, output):
 mol = molecule('H2O')
 mol = read('So3krates-torch/example/aspirin.xyz')
 mol = read('So3krates-torch/example/ala4.xyz')
+rmol = read('So3krates-torch/example/water_64.xyz')
 r_max = 5.0
+charge = 3
+mol.info["total_charge"] = charge
+mol.info["total_spin"] = 0.5
+mol.info["charge"] = charge
+mol.info["multiplicity"] = 2 * mol.info["total_spin"] + 1
+num_unpaired_electrons = mol.info["total_spin"] * 2
 
 z_table = utils.AtomicNumberTable(
             [int(z) for z in range(1, 119)]
@@ -29,7 +36,7 @@ dtype = 'float32'  # or torch.float64, depending on your model's requirements
 torch.set_default_dtype(getattr(torch, dtype))
 
 keyspec = data.KeySpecification(
-    info_keys={}, arrays_keys={"charges": "Qs"}
+    info_keys={"total_charge":"total_charge","total_spin":"total_spin"}, arrays_keys={"charges": "Qs"}
 )
 config = data.config_from_atoms(
     mol, key_specification=keyspec, head_name="default"
@@ -51,8 +58,9 @@ avg_num_neighbors = compute_avg_num_neighbors(
 )
 
 batch = next(iter(data_loader)).to(device)
-mace_mp_model_medium= mace_mp()
-mace_mp_model_small = mace_mp(model='small')
+
+#mace_mp_model_medium= mace_mp()
+#mace_mp_model_small = mace_mp(model='small')
 
 degrees = [1,2,3,4]
 model = So3krates(

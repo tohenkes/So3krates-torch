@@ -158,6 +158,7 @@ class ChargeSpinEmbedding(torch.nn.Module):
         e_psi = self.run_residual_mlp(
             a[:,None] * v
         )
+        #print(psi,e_psi[0,:10])
         return e_psi
 
 
