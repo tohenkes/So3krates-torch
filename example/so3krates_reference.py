@@ -472,12 +472,12 @@ print("TORCH version: ", result['forces'][0,:])
 print("JAX version  : ", calc.results['forces'][0,:])
 print(f"Difference   :  {np.abs(calc.results['forces'] - np.array(result['forces'].cpu())).mean().item():.6f}")
 print("\n\n")
-
-inference =False
+torch.set_float32_matmul_precision("high")
+inference =True
 if inference:
     print("Inference timings")
     import time
-    num_runs = 100
+    num_runs = 1000
     # Warmup run
     model(batch_torch_model)
     compiled_model(batch_torch_model)
