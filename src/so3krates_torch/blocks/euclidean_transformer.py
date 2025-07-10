@@ -262,6 +262,11 @@ class EuclideanAttentionBlock(torch.nn.Module):
         cutoffs: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
+        
+        inv_features = inv_features.contiguous()
+        ev_features = ev_features.contiguous()
+        rbf = rbf.contiguous()
+        
         #print(ev_features[0,:5])
         ev_differences = ev_features[senders] - ev_features[receivers]
         ev_differences_invariants = self.so3_conv_invariants(
@@ -277,11 +282,11 @@ class EuclideanAttentionBlock(torch.nn.Module):
         )
         # split filter weights into heads
         # now has shape [neighbors, num_heads, inv_head_dim]
-        filter_w_inv = filter_w_inv.view(
+        filter_w_inv = filter_w_inv.contiguous().view(
             -1, self.inv_heads, self.inv_head_dim
         )
         # now has shape [neighbors, len(degrees), ev_head_dim]
-        filter_w_ev = filter_w_ev.view(
+        filter_w_ev = filter_w_ev.contiguous().view(
             -1, self.ev_heads, self.ev_head_dim
         )
         # split features into heads
@@ -296,36 +301,66 @@ class EuclideanAttentionBlock(torch.nn.Module):
         )
         # computing the queries, keys, and values and immediately
         # selecting receivers (i) and senders (j) (Eq. 21 https://doi.org/10.1038/s41467-024-50620-6)
-        q_inv = self.qk_non_linearity(torch.einsum(
-            "Hij, NHi -> NHj",
-            self.W_q_inv,
-            inv_features_inv,
-        ))[receivers]
+        #q_inv = self.qk_non_linearity(torch.einsum(
+        #    "Hij, NHi -> NHj",
+        #    self.W_q_inv,
+        #    inv_features_inv,
+        #))[receivers]
 
-        k_inv = self.qk_non_linearity(torch.einsum(
-            "Hij, NHi -> NHj",
-            self.W_k_inv,
-            inv_features_inv,
-        ))[senders]
+        #k_inv = self.qk_non_linearity(torch.einsum(
+        #    "Hij, NHi -> NHj",
+        #    self.W_k_inv,
+        #    inv_features_inv,
+        #))[senders]
         
-        v_inv = torch.einsum(
-            "Hij, NHi -> NHj",
-            self.W_v_inv,
-            inv_features_inv,
+        #v_inv = torch.einsum(
+        #    "Hij, NHi -> NHj",
+        #    self.W_v_inv,
+        #    inv_features_inv,
+        #)[senders]
+        
+        #q_ev = self.qk_non_linearity(torch.einsum(
+        #    "Hij, NHi -> NHj",
+        #    self.W_q_ev,
+        #    inv_features_ev,
+        #))[receivers]
+        
+        #k_ev = self.qk_non_linearity(torch.einsum(
+        #    "Hij, NHi -> NHj",
+        #    self.W_k_ev,
+        #    inv_features_ev,
+        #))[senders]
+
+        # computing q_inv using matmul:
+        q_inv = self.qk_non_linearity(
+            torch.matmul(
+                inv_features_inv.transpose(0, 1),
+                self.W_q_inv
+            ).transpose(0, 1)
+        )[receivers]
+        k_inv = self.qk_non_linearity(
+            torch.matmul(
+                inv_features_inv.transpose(0, 1),
+                self.W_k_inv
+            ).transpose(0, 1)
         )[senders]
-        
-        q_ev = self.qk_non_linearity(torch.einsum(
-            "Hij, NHi -> NHj",
-            self.W_q_ev,
-            inv_features_ev,
-        ))[receivers]
-        
-        k_ev = self.qk_non_linearity(torch.einsum(
-            "Hij, NHi -> NHj",
-            self.W_k_ev,
-            inv_features_ev,
-        ))[senders]
-        
+        v_inv = torch.matmul(
+            inv_features_inv.transpose(0, 1),
+            self.W_v_inv
+        ).transpose(0, 1)[senders]
+        q_ev = self.qk_non_linearity(
+            torch.matmul(
+                inv_features_ev.transpose(0, 1),
+                self.W_q_ev
+            ).transpose(0, 1)
+        )[receivers]
+        k_ev = self.qk_non_linearity(
+            torch.matmul(
+                inv_features_ev.transpose(0, 1),
+                self.W_k_ev
+            ).transpose(0, 1)
+        )[senders]
+
         # Eq. 21 https://doi.org/10.1038/s41467-024-50620-6
         filtered_k_inv = k_inv * filter_w_inv
         filtered_k_ev = k_ev * filter_w_ev
