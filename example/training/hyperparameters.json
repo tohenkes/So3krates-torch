@@ -74,8 +74,8 @@
     },
     "model_seed": 7,
     "num_epochs": 5,
-    "num_train": 1172,
-    "num_valid": 100,
+    "num_train": 1145,
+    "num_valid": 127,
     "training_seed": 7,
     "use_wandb": true,
     "wandb_init_args": {

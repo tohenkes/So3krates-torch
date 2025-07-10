@@ -23,7 +23,6 @@ class So3krates(torch.nn.Module):
         features_dim: int,
         num_att_heads: int,
         final_mlp_layers: int,
-        atomic_numbers: List[int],
         num_interactions: int,
         num_elements: int,
         avg_num_neighbors: int,
@@ -51,9 +50,6 @@ class So3krates(torch.nn.Module):
     ):
         super().__init__()
         torch.set_default_dtype(dtype)
-        self.register_buffer(
-            "atomic_numbers", torch.tensor(atomic_numbers, dtype=torch.int64)
-        )
         self.register_buffer(
             "r_max", torch.tensor(r_max, dtype=torch.get_default_dtype())
         )
