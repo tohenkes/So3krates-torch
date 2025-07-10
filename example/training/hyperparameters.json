@@ -1,11 +1,12 @@
 {
   "data": {
-    "avg_num_neighbors": 13.168995780096482,
+    "avg_num_neighbors": null,
     "energy_unit": "eV",
-    "filepath": "/project/home/p200243/kabylda/datasets/universal_datasets/universal_long_aug.xyz",
+    "dipole_vec_unit": "Debye",
+    "filepath": "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/example/training/qm7x_1percent.extxyz",
     "length_unit": "Angstrom",
-    "neighbors_lr_bool": true,
-    "neighbors_lr_cutoff": 100.0,
+    "neighbors_lr_bool": true, 
+    "neighbors_lr_cutoff": 4.5,
     "shift_mode": "mean",
     "split_seed": 7
   },
@@ -15,10 +16,10 @@
     "cutoff_fn": "phys",
     "cutoff_lr": null,
     "degrees": [1, 2, 3, 4],
-    "dispersion_energy_bool": true,
+    "dispersion_energy_bool": false,
     "dispersion_energy_cutoff_lr_damping": null,
     "dispersion_energy_scale": 1.2,
-    "electrostatic_energy_bool": true,
+    "electrostatic_energy_bool": false,
     "electrostatic_energy_scale": 4.0,
     "energy_activation_fn": "silu",
     "energy_learn_atomic_type_scales": true,
@@ -36,12 +37,12 @@
     "num_radial_basis_fn": 32,
     "output_is_zero_at_init": false,
     "qk_non_linearity": "identity",
-    "radial_basis_fn": "bernstein",
+    "radial_basis_fn": "gaussian",
     "residual_mlp_1": true,
     "residual_mlp_2": false,
     "use_charge_embed": true,
     "use_spin_embed": true,
-    "zbl_repulsion_bool": true
+    "zbl_repulsion_bool": false
   },
   "neighborlist_format_lr": "sparse",
   "optimizer": {
@@ -62,26 +63,26 @@
   "training": {
     "allow_restart": true,
     "batch_max_num_edges": 40960,
-    "batch_max_num_graphs": 201,
-    "batch_max_num_nodes": 4096,
+    "batch_max_num_graphs": 101,
+    "batch_max_num_nodes": 40960,
     "batch_max_num_pairs": 40960,
-    "eval_every_num_steps": 25000,
+    "eval_every_num_steps": 50,
     "log_gradient_values": false,
     "loss_weights": {
-      "dipole_vec": 1.0,
-      "forces": 10.0,
-      "hirshfeld_ratios": 1.0
+      "energy": 1.0,
+      "forces": 10.0
     },
     "model_seed": 7,
-    "num_epochs": 100,
-    "num_train": 3846600,
-    "num_valid": 10000,
+    "num_epochs": 5,
+    "num_train": 1172,
+    "num_valid": 100,
     "training_seed": 7,
+    "use_wandb": true,
     "wandb_init_args": {
-      "group": "models_june",
-      "name": "so3_aulong_fedbj_412_amsgrad_2",
-      "project": "mlff_version_1"
+      "group": null,
+      "name": "test_run1",
+      "project": "test_torchkrates"
     }
   },
-  "workdir": "so3_aulong_fedbj_412_amsgrad_2"
+  "workdir": "test_run1"
 }
