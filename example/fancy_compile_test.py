@@ -213,3 +213,4 @@ total_input_list = [i.clone() for i in test_data_list+ weights + buffers]
 
 
 fx_model = _model_make_fx(model_to_trace, total_input_list)
+print(fx_model)

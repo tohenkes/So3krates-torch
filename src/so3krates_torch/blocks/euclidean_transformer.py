@@ -2,7 +2,7 @@ import torch
 from e3nn.util.jit import compile_mode
 from e3nn import o3
 from typing import Any, Callable, Dict, List, Optional, Type, Union, Tuple
-from so3krates_torch.blocks.so3_conv_invariants import SO3ConvolutionInvariants
+from so3krates_torch.blocks.so3_conv_invariants import L0Contraction
 import math
 from so3krates_torch.tools import scatter
 
@@ -179,7 +179,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             torch.tensor([2 * y + 1 for y in degrees]
                          )).item()
         self.inv_features_dim = features_dim
-        self.so3_conv_invariants = SO3ConvolutionInvariants(degrees=degrees)
+        self.so3_conv_invariants = L0Contraction(degrees=degrees)
 
         self.filter_net_inv = filter_net_inv
         self.filter_net_ev = filter_net_ev
@@ -270,7 +270,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
         #print(ev_features[0,:5])
         ev_differences = ev_features[senders] - ev_features[receivers]
         ev_differences_invariants = self.so3_conv_invariants(
-            ev_differences, ev_differences
+            ev_differences
         )
         filter_w_inv = self.filter_net_inv(
             rbf,
@@ -412,7 +412,7 @@ class InteractionBlock(torch.nn.Module):
             out_features=features_dim + len_degrees,
             bias=bias,
         )
-        self.so3_conv_invariants = SO3ConvolutionInvariants(degrees=degrees)
+        self.so3_conv_invariants = L0Contraction(degrees=degrees)
         # repeat the b_ev_features for each degree
         # e.g. for degrees=[0,1,2], we have repeats = [1, 3, 5]
         self.degree_repeats = torch.tensor(
@@ -425,7 +425,7 @@ class InteractionBlock(torch.nn.Module):
         ev_features: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        ev_invariants = self.so3_conv_invariants(ev_features, ev_features)
+        ev_invariants = self.so3_conv_invariants(ev_features)
         
         # Eq. 25 in https://doi.org/10.1038/s41467-024-50620-6
         cat_features = torch.concatenate([inv_features, ev_invariants], dim=-1)
