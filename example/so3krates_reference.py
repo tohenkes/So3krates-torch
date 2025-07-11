@@ -375,7 +375,6 @@ model = So3krates(
     degrees=cfg.model.degrees,
     features_dim=cfg.model.num_features,
     num_att_heads=cfg.model.num_heads,
-    atomic_numbers=mol.get_atomic_numbers(),  # H and O
     final_mlp_layers=2,  # TODO: check, does the last layer count?
     num_interactions=cfg.model.num_layers,
     num_elements=len(z_table),

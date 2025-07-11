@@ -15,9 +15,7 @@ def nan_hook(module, input, output):
         print(f"NaN in module: {module.__class__.__name__}")
 
 mol = molecule('H2O')
-mol = read('So3krates-torch/example/aspirin.xyz')
-mol = read('So3krates-torch/example/ala4.xyz')
-rmol = read('So3krates-torch/example/water_64.xyz')
+rmol = read('./water_64.xyz')
 r_max = 5.0
 charge = 3
 mol.info["total_charge"] = charge
@@ -69,7 +67,6 @@ model = So3krates(
     degrees=degrees,
     features_dim=132,
     num_att_heads=4,
-    atomic_numbers=mol.get_atomic_numbers(),  # H and O
     final_mlp_layers=2,  # TODO: check, does the last layer count?
     num_interactions=1,
     num_elements=len(z_table),
@@ -102,17 +99,23 @@ if False:
             print(f"{name}: {param.shape} ({param.numel()} parameters)")
 
 # save params:
-torch.save(
-    model.state_dict(),
-    'So3krates-torch/example/torchkrates.pth',
-    
-)
+#torch.save(
+##    model.state_dict(),
+ #   'So3krates-torch/example/torchkrates.pth',
+ #   
+#)
 
 batch["positions"].requires_grad_(True)
 torch._dynamo.config.suppress_errors = False
 #scripted_model = jit.compile(model)
 result = model(batch)
 print(f"Not compiled: Energy: {result['energy'].item():.4f}")
+
+
+exit()
+
+
+
 print("COMPILING...")
 model = torch.compile(model)
 
