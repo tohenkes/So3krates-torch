@@ -205,6 +205,7 @@ class So3krates(torch.nn.Module):
             cutoffs=cutoffs,
             receivers=receivers,
             inv_avg_num_neighbors=self.inv_avg_num_neighbors,
+            num_nodes=inv_features.shape[0],
         )
         rbf = self.radial_embedding(self.lengths)
         

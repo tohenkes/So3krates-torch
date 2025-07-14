@@ -380,7 +380,10 @@ class EuclideanAttentionBlock(torch.nn.Module):
         
         # already combining heads for ev here
         alpha_ev = torch.repeat_interleave(
-            alpha_ev, self.degree_repeats, dim=-1
+            alpha_ev,
+            self.degree_repeats, 
+            dim=-1,
+            output_size=self.ev_features_dim
         )
         # Eq. 26 https://doi.org/10.1038/s41467-024-50620-6
         scaled_neighbors_ev = cutoffs * alpha_ev * sh_vectors
@@ -438,7 +441,7 @@ class InteractionBlock(torch.nn.Module):
             dim=-1,
         )
         b_ev_features = torch.repeat_interleave(
-            b_ev_features, self.degree_repeats, dim=-1
+            b_ev_features, self.degree_repeats, dim=-1, output_size=ev_features.shape[-1]
         )
         # Eq. 24 in https://doi.org/10.1038/s41467-024-50620-6
         d_ev_features = b_ev_features * ev_features

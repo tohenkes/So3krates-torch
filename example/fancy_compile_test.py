@@ -7,6 +7,46 @@ from mace.modules.utils import compute_avg_num_neighbors
 from torch.fx.experimental.proxy_tensor import make_fx
 from typing import Dict, Sequence, List, Optional, Any, Final
 import contextlib
+import math
+import difflib
+import os
+import uuid
+
+def highlight_code_differences(code1, code2):
+    differ = difflib.Differ()
+    diff = list(differ.compare(code1.splitlines(), code2.splitlines()))
+
+    highlighted = []
+    for line in diff:
+        if line.startswith("  "):  # unchanged line
+            highlighted.append(line[2:])
+        elif line.startswith("- "):  # removed line
+            highlighted.append(f"\033[91m{line[2:]}\033[0m")  # red
+        elif line.startswith("+ "):  # Added line
+            highlighted.append(f"\033[92m{line[2:]}\033[0m")  # green
+        elif line.startswith("? "):  # line with changes
+            continue  # skip the change markers
+
+    return "\n".join(highlighted)
+
+
+def check_make_fx_diff(fx_model_1, fx_model_2, fields: List[str]):
+    print("Checking for differences in FX models...")
+    if fx_model_1.code != fx_model_2.code:
+        # the following is commented to prevent obscuring the error message below
+        # devs can uncomment for diagonosing shape specializations
+        print(highlight_code_differences(fx_model_1.code, fx_model_2.code))
+        dump_dir = str(os.getcwd()) + "/nequip_fx_dump_" + str(uuid.uuid4())
+        os.mkdir(dump_dir)
+        with open(dump_dir + "/fx_model_1.txt", "w") as f:
+            f.write(f"# Argument order:\n{fields} + extra_inputs\n")
+            f.write(fx_model_1.code)
+        with open(dump_dir + "/fx_model_2.txt", "w") as f:
+            f.write(f"# Argument order:\n{fields} + extra_inputs\n")
+            f.write(fx_model_2.code)
+        raise RuntimeError(
+            f"An unexpected internal error has occurred (the fx'ed models for different input shapes do not agree) -- please report this issue on the NequIP GitHub, and upload the files in {dump_dir}."
+        )
 
 def _list_to_dict(
     keys: Sequence[str], args: List[torch.Tensor]
@@ -121,7 +161,7 @@ def _model_make_fx(model, inputs):
         )(*[i.clone() for i in inputs])
         
 
-
+seed = 42
 
 mol = read('./ala4.xyz')
 r_max = 5.0
@@ -208,9 +248,98 @@ weights, buffers = _get_weights_buffers(model, weight_names, buffer_names)
 
 test_data_list = [batch[key] for key in input_fields]
 
-total_input_list = [i.clone() for i in test_data_list+ weights + buffers]
+total_input_list = test_data_list + weights + buffers
 #model_to_trace(*total_input_list)
 
 
 fx_model = _model_make_fx(model_to_trace, total_input_list)
-print(fx_model)
+
+
+generator = torch.Generator(device).manual_seed(seed)
+num_nodes = batch['positions'].shape[0]
+node_idx = torch.randint(
+    low=0,
+    high=num_nodes,
+    size=(max(2, math.ceil(num_nodes * 0.1)),),
+    generator=generator,
+    device=device,
+)
+node_mask = torch.ones(num_nodes, dtype=torch.bool, device=device)
+node_mask[node_idx] = False
+edge_idx = batch['edge_index']
+edge_mask = node_mask[edge_idx[0]] & node_mask[edge_idx[1]]
+new_index = torch.full(
+    (num_nodes,),
+    fill_value=-1,
+    dtype=torch.long,
+    device=device,
+)
+new_index[node_mask] = torch.arange(
+    node_mask.sum(),
+    dtype=torch.long,
+    device=device,
+)
+
+new_dict = {}
+for key, value in batch.items():
+    if key == 'edge_index':
+        # Filter edges and update indices
+        filtered_edge_index = edge_idx[:, edge_mask]
+        new_dict[key] = torch.stack([
+            new_index[filtered_edge_index[0]],
+            new_index[filtered_edge_index[1]]
+        ])
+    elif key in ['shifts', 'unit_shifts']:
+        # Filter edge-level features using edge_mask
+        new_dict[key] = value[edge_mask]
+    elif key == 'batch':
+        # Filter batch indices for nodes
+        new_dict[key] = value[node_mask]
+    elif key in ['charges', 'positions', 'forces', 'node_attrs']:
+        # Filter node-level features
+        new_dict[key] = value[node_mask]
+    elif key == 'ptr':
+        # Update ptr to reflect new node count
+        new_dict[key] = torch.tensor([0, node_mask.sum()], dtype=value.dtype, device=device)
+    else:
+        # Keep graph-level properties unchanged
+        new_dict[key] = value
+
+augmented_data_list = [new_dict[key] for key in input_fields]
+total_augmented_list = augmented_data_list + weights + buffers
+augmented_fx_model = _model_make_fx(model_to_trace, total_augmented_list)
+
+torch.cuda.empty_cache()
+
+check_make_fx_diff(fx_model, augmented_fx_model, input_fields)
+
+#torch._dynamo.config.capture_dynamic_output_shape_ops = True
+fx = True
+if fx:
+    compiled_model = torch.compile(
+        fx_model,
+        dynamic=True,
+        fullgraph=True
+    )
+#compiled_model(batch)
+
+    out = compiled_model(
+        *(test_data_list + weights + buffers)
+    )
+else:
+    compiled_model = torch.compile(
+        model,
+        dynamic=True,
+        fullgraph=False
+    )
+    out = compiled_model(batch)
+
+print("Compiled model output:")
+print(out,"\n")
+out = model(batch)
+print("Original model output:")
+print(out)
+exit()
+
+#print(out)
+#print(fx_model)
