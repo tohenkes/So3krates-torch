@@ -1,7 +1,7 @@
 from mlff.config.from_config import make_so3krates_sparse_from_config
 import jax
 from ml_collections import config_dict
-from so3krates_torch.modules.models import So3krates
+from so3krates_torch.modules.models import So3krates, SO3LR
 from mace.tools import torch_geometric, utils
 from ase.build import molecule
 import torch
@@ -16,6 +16,9 @@ import numpy as np
 from mlff.sph_ops import make_l0_contraction_fn
 from so3krates_torch.blocks.so3_conv_invariants import SO3ConvolutionInvariants
 from so3krates_torch.modules.spherical_harmonics import RealSphericalHarmonics
+from ase.stress import full_3x3_to_voigt_6_stress
+from so3krates_torch.data.atomic_data import AtomicData as So3Data
+from mlff.utils.calculator_utils import load_hyperparameters
 
 def atoms_to_batch(
         atoms,
@@ -111,13 +114,16 @@ else:
 #mol = read('So3krates-torch/example/aspirin.xyz')
 #mol = read('So3krates-torch/example/ala4.xyz')
 mol = read('So3krates-torch/example/water_64.xyz')
+#mol = read('So3krates-torch/example/ala15.xyz')
+compute_stress = False
 charge = 3
 mol.info["total_charge"] = charge
 mol.info["total_spin"] = 0.5
 mol.info["charge"] = charge
 mol.info["multiplicity"] = 2 * mol.info["total_spin"] + 1
 num_unpaired_electrons = mol.info["total_spin"] * 2
-r_max = 5.
+r_max = 4.5
+r_max_lr = 12.0
 
 z_table = utils.AtomicNumberTable(
             [int(z) for z in range(1, 119)]
@@ -134,10 +140,11 @@ config = data.config_from_atoms(
 )
 data_loader = torch_geometric.dataloader.DataLoader(
     dataset=20*[
-        data.AtomicData.from_config(
+        So3Data.from_config(
             config,
             z_table=z_table,
             cutoff=r_max,
+            cutoff_lr=r_max_lr
         )
     ],
     batch_size=1,
@@ -159,8 +166,8 @@ cfg.model.num_features_head = 32
 cfg.model.radial_basis_fn = 'gaussian'
 cfg.model.num_radial_basis_fn = 32
 cfg.model.cutoff_fn = 'cosine'
-cfg.model.cutoff = 5.0
-cfg.model.cutoff_lr = None
+cfg.model.cutoff = r_max
+cfg.model.cutoff_lr = r_max_lr
 cfg.model.degrees = [1,2,3,4]
 cfg.model.residual_mlp_1 = True
 cfg.model.residual_mlp_2 = True
@@ -179,13 +186,13 @@ cfg.model.energy_regression_dim = 66
 cfg.model.energy_activation_fn = 'silu'
 cfg.model.energy_learn_atomic_type_scales = True
 cfg.model.energy_learn_atomic_type_shifts = True
-cfg.model.electrostatic_energy_bool = False
+cfg.model.electrostatic_energy_bool = True
 cfg.model.electrostatic_energy_scale = 4.0
 cfg.model.dispersion_energy_bool = False
-cfg.model.dispersion_energy_cutoff_lr_damping = None
+cfg.model.dispersion_energy_cutoff_lr_damping = 2.0
 cfg.model.dispersion_energy_scale = 1.2
 cfg.model.return_representations_bool = False
-cfg.model.zbl_repulsion_bool = False
+cfg.model.zbl_repulsion_bool = True
 cfg.neighborlist_format_lr = 'sparse'
 cfg.model.output_intermediate_quantities = False
 
@@ -210,7 +217,7 @@ batch_segments = jnp.array(batch['batch'])
 node_mask = jnp.ones((num_nodes,), dtype=jnp.bool_)
 graph_mask = jnp.array([True])
 idx_j, idx_i = jnp.array(batch['edge_index'][0]), jnp.array(batch['edge_index'][1])
-
+idx_j_lr, idx_i_lr = jnp.array(batch['edge_index_lr'][0]), jnp.array(batch['edge_index_lr'][1])
 inputs = {
     'x': features,
     'atomic_numbers': atomic_numbers,
@@ -219,6 +226,8 @@ inputs = {
     'graph_mask': graph_mask,
     'idx_i': idx_i,
     'idx_j': idx_j,
+    'idx_i_lr': idx_i_lr,
+    'idx_j_lr': idx_j_lr, 
     'positions': positions,
     'total_charge': jnp.array([charge]),
     'num_unpaired_electrons': jnp.array([num_unpaired_electrons]),
@@ -228,13 +237,11 @@ params = model.init(key,inputs)
 params = unfreeze(params)
 flattened_params = flatten_params(params)
 
-#for k, v in flattened_params.items():
-#    print(f"{k}: {v.shape} ({v.size} elements)")
-#exit()
 
-
+    
 def generate_full_flax_to_torch_mapping(
-    cfg
+    cfg,
+    trainable_rbf: bool
     ):
     num_layers = cfg.model.num_layers
     layer_norm_1 = cfg.model.layer_normalization_1
@@ -245,12 +252,17 @@ def generate_full_flax_to_torch_mapping(
     learn_atomic_type_scales = cfg.model.energy_learn_atomic_type_scales
     use_charge_embed = cfg.model.use_charge_embed
     use_spin_embed = cfg.model.use_spin_embed
+    use_zbl = cfg.model.zbl_repulsion_bool
+    use_electrostatic_energy = cfg.model.electrostatic_energy_bool
+    use_dispersion_energy = cfg.model.dispersion_energy_bool
+    
     mapping = {}
 
     # Embedding layers
     mapping["params/feature_embeddings_0/Embed_0/embedding"] = "inv_feature_embedding.embedding.weight"
-    mapping["params/geometry_embeddings_0/rbf_fn/centers"] = "radial_embedding.radial_basis_fn.centers"
-    mapping["params/geometry_embeddings_0/rbf_fn/widths"] = "radial_embedding.radial_basis_fn.widths"
+    if trainable_rbf:   
+        mapping["params/geometry_embeddings_0/rbf_fn/centers"] = "radial_embedding.radial_basis_fn.centers"
+        mapping["params/geometry_embeddings_0/rbf_fn/widths"] = "radial_embedding.radial_basis_fn.widths"
     if use_charge_embed and not use_spin_embed:
         mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"] = "charge_embedding.Wq.weight"
         mapping["params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"] = "charge_embedding.Wk"
@@ -338,14 +350,43 @@ def generate_full_flax_to_torch_mapping(
             mapping[f"params/layers_{i}/res_mlp_2_layer_2/bias"] = f"{torch_prefix}.residual_mlp_2.3.bias"
             
     # Output layers
-    mapping["params/observables_0/energy_dense_regression/kernel"] = "energy_output_block.layers.0.weight"
-    mapping["params/observables_0/energy_dense_regression/bias"] = "energy_output_block.layers.0.bias"
-    mapping["params/observables_0/energy_dense_final/kernel"] = "energy_output_block.final_layer.weight"
-    mapping["params/observables_0/energy_dense_final/bias"] = "energy_output_block.final_layer.bias"
+    mapping["params/observables_0/energy_dense_regression/kernel"] = "atomic_energy_output_block.layers.0.weight"
+    mapping["params/observables_0/energy_dense_regression/bias"] = "atomic_energy_output_block.layers.0.bias"
+    mapping["params/observables_0/energy_dense_final/kernel"] = "atomic_energy_output_block.final_layer.weight"
+    mapping["params/observables_0/energy_dense_final/bias"] = "atomic_energy_output_block.final_layer.bias"
     if learn_atomic_type_shifts:
-        mapping["params/observables_0/energy_offset"] = "energy_output_block.energy_shifts.weight"
+        mapping["params/observables_0/energy_offset"] = "atomic_energy_output_block.energy_shifts.weight"
     if learn_atomic_type_scales:
-        mapping["params/observables_0/atomic_scales"] = "energy_output_block.energy_scales.weight"
+        mapping["params/observables_0/atomic_scales"] = "atomic_energy_output_block.energy_scales.weight"
+
+
+    params_obs = "params/observables_0/"
+    if use_zbl:
+        mapping[f"{params_obs}zbl_repulsion/a1"] = "zbl_repulsion.a1_raw"
+        mapping[f"{params_obs}zbl_repulsion/a2"] = "zbl_repulsion.a2_raw"
+        mapping[f"{params_obs}zbl_repulsion/a3"] = "zbl_repulsion.a3_raw"
+        mapping[f"{params_obs}zbl_repulsion/a4"] = "zbl_repulsion.a4_raw"
+        mapping[f"{params_obs}zbl_repulsion/c1"] = "zbl_repulsion.c1_raw"
+        mapping[f"{params_obs}zbl_repulsion/c2"] = "zbl_repulsion.c2_raw"
+        mapping[f"{params_obs}zbl_repulsion/c3"] = "zbl_repulsion.c3_raw"
+        mapping[f"{params_obs}zbl_repulsion/c4"] = "zbl_repulsion.c4_raw"
+        mapping[f"{params_obs}zbl_repulsion/p"] = "zbl_repulsion.p_raw"
+        mapping[f"{params_obs}zbl_repulsion/d"] = "zbl_repulsion.d_raw"
+
+    if use_electrostatic_energy:
+        mapping[f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"] = "partial_charges_output_block.atomic_embedding.weight"
+        mapping[f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/kernel"] = "partial_charges_output_block.transform_inv_features.0.weight"
+        mapping[f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/bias"] = "partial_charges_output_block.transform_inv_features.0.bias"
+        mapping[f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/kernel"] = "partial_charges_output_block.transform_inv_features.2.weight"
+        mapping[f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/bias"] = "partial_charges_output_block.transform_inv_features.2.bias"
+
+    if use_dispersion_energy:
+        mapping["params/observables_2/Embed_0/embedding"] = "hirshfeld_output_block.v_shift_embedding.weight"
+        mapping["params/observables_2/Embed_1/embedding"] = "hirshfeld_output_block.q_embedding.weight"
+        mapping["params/observables_2/hirshfeld_ratios_dense_regression/kernel"] = "hirshfeld_output_block.transform_features.0.weight"
+        mapping["params/observables_2/hirshfeld_ratios_dense_regression/bias"] = "hirshfeld_output_block.transform_features.0.bias"
+        mapping["params/observables_2/hirshfeld_ratios_dense_final/kernel"] = "hirshfeld_output_block.transform_features.2.weight"
+        mapping["params/observables_2/hirshfeld_ratios_dense_final/bias"] = "hirshfeld_output_block.transform_features.2.bias"
 
     return mapping
 
@@ -359,47 +400,101 @@ import pickle
 with open('So3krates-torch/example/params.pkl', 'wb') as f:
     pickle.dump(params, f)
     
+workdir='So3krates-torch/example/so3lr'
+r_max_lr=6.0
 calc = AseCalculatorSparse.create_from_workdir(
-    workdir='So3krates-torch/example/',
+    workdir=workdir,
     from_file=True,
+    calculate_stress=compute_stress,
+    lr_cutoff=r_max_lr,
+    dispersion_energy_cutoff_lr_damping = 2.0
 )
+cfg = load_hyperparameters(workdir=workdir)
+cfg.model.dispersion_energy_cutoff_lr_damping = 2.0
+trainable_rbf=False
+r_max=cfg.model.cutoff
 
+with open(workdir + '/params.pkl', 'rb') as f:
+    params = pickle.load(f)
+params = unfreeze(params)
+flattened_params = flatten_params(params)
+#exit()
+for k, v in flattened_params.items():
+    print(f"{k}: {v.shape} ({v.size} elements)")
 
+so3lr = True
+if not so3lr:
+    model = So3krates(
+        r_max=5.0,
+        num_radial_basis=cfg.model.num_radial_basis_fn,
+        degrees=cfg.model.degrees,
+        features_dim=cfg.model.num_features,
+        num_att_heads=cfg.model.num_heads,
+        final_mlp_layers=2,  # TODO: check, does the last layer count?
+        num_interactions=cfg.model.num_layers,
+        num_elements=len(z_table),
+        avg_num_neighbors=avg_num_neighbors,
+        message_normalization=cfg.model.message_normalization,
+        seed=42,
+        device=device,
+        trainable_rbf=trainable_rbf,
+        dtype=dtype,
+        learn_atomic_type_shifts=cfg.model.energy_learn_atomic_type_shifts,
+        learn_atomic_type_scales=cfg.model.energy_learn_atomic_type_scales,
+        energy_regression_dim=cfg.model.energy_regression_dim,
+        layer_normalization_1=cfg.model.layer_normalization_1, 
+        layer_normalization_2=cfg.model.layer_normalization_2, 
+        residual_mlp_1=cfg.model.residual_mlp_1,
+        residual_mlp_2=cfg.model.residual_mlp_2,
+        use_charge_embed=cfg.model.use_charge_embed,
+        use_spin_embed=cfg.model.use_spin_embed,   
+    )
 
-
-
-max_l = 3
-model = So3krates(
-    r_max=5.0,
-    num_radial_basis=cfg.model.num_radial_basis_fn,
-    degrees=cfg.model.degrees,
-    features_dim=cfg.model.num_features,
-    num_att_heads=cfg.model.num_heads,
-    final_mlp_layers=2,  # TODO: check, does the last layer count?
-    num_interactions=cfg.model.num_layers,
-    num_elements=len(z_table),
-    avg_num_neighbors=avg_num_neighbors,
-    message_normalization=cfg.model.message_normalization,
-    seed=42,
-    device=device,
-    trainable_rbf=True,
-    dtype=dtype,
-    learn_atomic_type_shifts=cfg.model.energy_learn_atomic_type_shifts,
-    learn_atomic_type_scales=cfg.model.energy_learn_atomic_type_scales,
-    energy_regression_dim=cfg.model.energy_regression_dim,
-    layer_normalization_1=cfg.model.layer_normalization_1, 
-    layer_normalization_2=cfg.model.layer_normalization_2, 
-    residual_mlp_1=cfg.model.residual_mlp_1,
-    residual_mlp_2=cfg.model.residual_mlp_2,
-    use_charge_embed=cfg.model.use_charge_embed,
-    use_spin_embed=cfg.model.use_spin_embed,
-)
-
+model = SO3LR(
+        r_max=r_max,
+        r_max_lr=r_max_lr,
+        num_radial_basis=cfg.model.num_radial_basis_fn,
+        degrees=cfg.model.degrees,
+        features_dim=cfg.model.num_features,
+        num_att_heads=cfg.model.num_heads,
+        final_mlp_layers=2,  # TODO: check, does the last layer count?
+        num_interactions=cfg.model.num_layers,
+        num_elements=len(z_table),
+        avg_num_neighbors=cfg.data.avg_num_neighbors,
+        cutoff_fn=cfg.model.cutoff_fn,
+        radial_basis_fn=cfg.model.radial_basis_fn,
+        message_normalization=cfg.model.message_normalization,
+        seed=42,
+        device=device,
+        trainable_rbf=trainable_rbf,
+        dtype=dtype,
+        atomic_type_shifts=None,#cfg.data.energy_shifts.to_dict(),
+        learn_atomic_type_shifts=cfg.model.energy_learn_atomic_type_shifts,
+        learn_atomic_type_scales=cfg.model.energy_learn_atomic_type_scales,
+        energy_regression_dim=cfg.model.energy_regression_dim,
+        layer_normalization_1=cfg.model.layer_normalization_1, 
+        layer_normalization_2=cfg.model.layer_normalization_2, 
+        residual_mlp_1=cfg.model.residual_mlp_1,
+        residual_mlp_2=cfg.model.residual_mlp_2,
+        use_charge_embed=cfg.model.use_charge_embed,
+        use_spin_embed=cfg.model.use_spin_embed,
+        zbl_repulsion_bool=cfg.model.zbl_repulsion_bool,
+        electrostatic_energy_bool=cfg.model.electrostatic_energy_bool,
+        electrostatic_energy_scale=cfg.model.electrostatic_energy_scale,
+        dispersion_energy_bool=cfg.model.dispersion_energy_bool,
+        dispersion_energy_cutoff_lr_damping=cfg.model.dispersion_energy_cutoff_lr_damping
+    )
+if False:
+    print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"{name}: {param.shape} ({param.numel()} parameters)")
 
 
 state_dict = model.state_dict()
 mapping = generate_full_flax_to_torch_mapping(
-    cfg=cfg
+    cfg=cfg,
+    trainable_rbf=trainable_rbf
 )
 
 #for k,v in mapping.items():
@@ -415,6 +510,9 @@ special_embeddings = [
     "charge_embedding.Wv",
     "spin_embedding.Wk",
     "spin_embedding.Wv",
+    "partial_charges_output_block.atomic_embedding.weight",
+    "hirshfeld_output_block.v_shift_embedding.weight",
+    "hirshfeld_output_block.q_embedding.weight"
 ]
 for flax_key, torch_key in mapping.items():
     flax_array = flattened_params[flax_key]
@@ -442,20 +540,26 @@ for flax_key, torch_key in mapping.items():
 
 model.load_state_dict(state_dict, strict=True)
 
-
 model.to(device).eval()
 compiled_model = torch.compile(model)
 batch_torch_model = batch.to(device)
 batch_torch_model = batch_torch_model.to_dict()
 batch_torch_model["positions"].requires_grad_(True)
-result = model(batch_torch_model)
+batch_torch_model["atomic_numbers"] = torch.argmax(batch["node_attrs"], dim=-1) + 1
+result = model(batch_torch_model,
+               compute_virials=True,
+               compute_stress=compute_stress)
 
 compute = True
 #compute = False
 
-
-if compute:
-    calc.calculate(mol, properties=['energy', 'forces'],)
+with jax.disable_jit():
+    if compute:
+        if compute_stress:
+            calc.calculate(mol, properties=['energy', 'forces', 'stress'],)
+        else:
+            calc.calculate(mol, properties=['energy', 'forces'],)
+        
 
 print("\n\n")
 print("##############  RESULTS  ##############")
@@ -469,10 +573,25 @@ print("\n\n")
 print("Forces")
 print("TORCH version: ", result['forces'][0,:])    
 print("JAX version  : ", calc.results['forces'][0,:])
-print(f"Difference   :  {np.abs(calc.results['forces'] - np.array(result['forces'].cpu())).mean().item():.6f}")
-print("\n\n")
+force_diff = np.abs(calc.results['forces'][0,:] - result['forces'][0,:].cpu().numpy())
+print(f"Difference   :  {force_diff.mean().item():.6f}")
+
+if compute_stress:
+    print("\n\n")
+    print("Stress")
+    torch_stress = full_3x3_to_voigt_6_stress(
+        result["stress"].detach().cpu().numpy()
+    )
+    print("TORCH version: ", torch_stress)
+    print("JAX version  : ", calc.results['stress'])
+    stress_diff = np.abs(calc.results['stress'] - torch_stress)
+    print(f"Difference   :  {stress_diff.mean().item():.6f}")
+
+    print("\n\n")
+
+
 torch.set_float32_matmul_precision("high")
-inference =True
+inference =False
 if inference:
     print("Inference timings")
     import time

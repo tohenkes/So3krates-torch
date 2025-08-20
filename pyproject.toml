@@ -31,3 +31,4 @@ homepage = "https://github.com/tohenkes/So3krates-torch"
 where = ["src"]
 
 [project.scripts]
+torchkrates-jax2torch = "so3krates_torch.cli.jax_to_torch:main"

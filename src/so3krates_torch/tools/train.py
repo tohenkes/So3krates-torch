@@ -177,7 +177,9 @@ def train(
         import wandb
 
     if max_grad_norm is not None:
-        logging.info(f"Using gradient clipping with tolerance={max_grad_norm:.3f}")
+        logging.info(
+            f"Using gradient clipping with tolerance={max_grad_norm:.3f}"
+        )
 
     logging.info("")
     logging.info("===========TRAINING===========")
@@ -195,9 +197,16 @@ def train(
             device=device,
         )
         valid_err_log(
-            valid_loss_head, eval_metrics, logger, log_errors, None, valid_loader_name
+            valid_loss_head,
+            eval_metrics,
+            logger,
+            log_errors,
+            None,
+            valid_loader_name,
         )
-    valid_loss = valid_loss_head  # consider only the last head for the checkpoint
+    valid_loss = (
+        valid_loss_head  # consider only the last head for the checkpoint
+    )
 
     while epoch < max_num_epochs:
         # LR scheduler and SWA update
@@ -283,9 +292,7 @@ def train(
                         plotter.plot(epoch, model_to_evaluate, rank)
                     except Exception as e:  # pylint: disable=broad-except
                         logging.debug(f"Plotting failed: {e}")
-                valid_loss = (
-                    valid_loss_head  # consider only the last head for the checkpoint
-                )
+                valid_loss = valid_loss_head  # consider only the last head for the checkpoint
             if log_wandb:
                 wandb.log(wandb_log_dict)
             if rank == 0:
@@ -310,7 +317,9 @@ def train(
                         )
                         with param_context:
                             checkpoint_handler.save(
-                                state=CheckpointState(model, optimizer, lr_scheduler),
+                                state=CheckpointState(
+                                    model, optimizer, lr_scheduler
+                                ),
                                 epochs=epoch,
                                 keep_last=True,
                             )
@@ -318,11 +327,15 @@ def train(
                     lowest_loss = valid_loss
                     patience_counter = 0
                     param_context = (
-                        ema.average_parameters() if ema is not None else nullcontext()
+                        ema.average_parameters()
+                        if ema is not None
+                        else nullcontext()
                     )
                     with param_context:
                         checkpoint_handler.save(
-                            state=CheckpointState(model, optimizer, lr_scheduler),
+                            state=CheckpointState(
+                                model, optimizer, lr_scheduler
+                            ),
                             epochs=epoch,
                             keep_last=keep_last,
                         )
@@ -412,7 +425,9 @@ def take_step(
         loss = loss_fn(pred=output, ref=batch)
         loss.backward()
         if max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=max_grad_norm
+            )
 
         return loss
 
@@ -490,10 +505,14 @@ def take_step_lbfgs(
             total_loss += batch_loss
 
         if max_grad_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=max_grad_norm
+            )
 
         if distributed:
-            torch.distributed.all_reduce(total_loss, op=torch.distributed.ReduceOp.SUM)
+            torch.distributed.all_reduce(
+                total_loss, op=torch.distributed.ReduceOp.SUM
+            )
         return total_loss
 
     if distributed:
@@ -565,12 +584,20 @@ class MACELoss(Metric):
     def __init__(self, loss_fn: torch.nn.Module):
         super().__init__()
         self.loss_fn = loss_fn
-        self.add_state("total_loss", default=torch.tensor(0.0), dist_reduce_fx="sum")
-        self.add_state("num_data", default=torch.tensor(0.0), dist_reduce_fx="sum")
-        self.add_state("E_computed", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "total_loss", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state(
+            "num_data", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
+        self.add_state(
+            "E_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
         self.add_state("delta_es", default=[], dist_reduce_fx="cat")
         self.add_state("delta_es_per_atom", default=[], dist_reduce_fx="cat")
-        self.add_state("Fs_computed", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "Fs_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
         self.add_state("fs", default=[], dist_reduce_fx="cat")
         self.add_state("delta_fs", default=[], dist_reduce_fx="cat")
         self.add_state(
@@ -581,8 +608,12 @@ class MACELoss(Metric):
             "virials_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
         self.add_state("delta_virials", default=[], dist_reduce_fx="cat")
-        self.add_state("delta_virials_per_atom", default=[], dist_reduce_fx="cat")
-        self.add_state("Mus_computed", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state(
+            "delta_virials_per_atom", default=[], dist_reduce_fx="cat"
+        )
+        self.add_state(
+            "Mus_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
         self.add_state("mus", default=[], dist_reduce_fx="cat")
         self.add_state("delta_mus", default=[], dist_reduce_fx="cat")
         self.add_state("delta_mus_per_atom", default=[], dist_reduce_fx="cat")
@@ -596,7 +627,8 @@ class MACELoss(Metric):
             self.E_computed += 1.0
             self.delta_es.append(batch.energy - output["energy"])
             self.delta_es_per_atom.append(
-                (batch.energy - output["energy"]) / (batch.ptr[1:] - batch.ptr[:-1])
+                (batch.energy - output["energy"])
+                / (batch.ptr[1:] - batch.ptr[:-1])
             )
         if output.get("forces") is not None and batch.forces is not None:
             self.Fs_computed += 1.0
@@ -621,7 +653,9 @@ class MACELoss(Metric):
                 / (batch.ptr[1:] - batch.ptr[:-1]).unsqueeze(-1)
             )
 
-    def convert(self, delta: Union[torch.Tensor, List[torch.Tensor]]) -> np.ndarray:
+    def convert(
+        self, delta: Union[torch.Tensor, List[torch.Tensor]]
+    ) -> np.ndarray:
         if isinstance(delta, list):
             delta = torch.cat(delta)
         return to_numpy(delta)

@@ -1,6 +1,5 @@
 import torch
 from e3nn.util.jit import compile_mode
-from e3nn import o3
 from typing import Callable, List, Dict, Optional
 import torch
 import torch.nn as nn
@@ -9,6 +8,7 @@ import numpy as np
 import pkg_resources
 from so3krates_torch.tools.scatter import scatter_sum
 
+
 @compile_mode("script")
 class SO3ConvolutionInvariants(torch.nn.Module):
     def __init__(
@@ -16,6 +16,7 @@ class SO3ConvolutionInvariants(torch.nn.Module):
         degrees: List[int],
     ):
         super().__init__()
+        import e3nn.o3 as o3
 
         irreps_list = []
         for l in degrees:
@@ -34,12 +35,15 @@ class SO3ConvolutionInvariants(torch.nn.Module):
     ) -> torch.Tensor:
 
         return self.tensor_product(ev_features_1, ev_features_2)
-    
+
+
 indx_fn = lambda x: int((x + 1) ** 2) if x >= 0 else 0
 
+
 def load_cgmatrix():
-    stream = pkg_resources.resource_stream(__name__, 'cgmatrix.npz')
-    return np.load(stream)['cg']
+    stream = pkg_resources.resource_stream(__name__, "cgmatrix.npz")
+    return np.load(stream)["cg"]
+
 
 def init_clebsch_gordan_matrix(degrees, l_out_max=0):
     l_in_max = max(degrees)
@@ -47,36 +51,52 @@ def init_clebsch_gordan_matrix(degrees, l_out_max=0):
     offset_corr = indx_fn(l_in_min - 1)
     cg_full = load_cgmatrix()
     return cg_full[
-        offset_corr:indx_fn(l_out_max),
-        offset_corr:indx_fn(l_in_max),
-        offset_corr:indx_fn(l_in_max)
+        offset_corr : indx_fn(l_out_max),
+        offset_corr : indx_fn(l_in_max),
+        offset_corr : indx_fn(l_in_max),
     ]
 
+
 class L0Contraction(nn.Module):
-    def __init__(self, degrees, dtype=torch.float32, device='cpu'):
+    def __init__(self, degrees, dtype=torch.float32, device="cpu"):
         super().__init__()
         self.degrees = degrees
         self.num_segments = len(degrees)
 
         # Always include l=0 in CG matrix construction (mimicking {0, *degrees})
-        cg_matrix = init_clebsch_gordan_matrix(degrees=list({0, *degrees}), l_out_max=0)
-        cg_diag = np.diagonal(cg_matrix, axis1=1, axis2=2)[0]  # shape: (m_tot,)
+        cg_matrix = init_clebsch_gordan_matrix(
+            degrees=list({0, *degrees}), l_out_max=0
+        )
+        cg_diag = np.diagonal(cg_matrix, axis1=1, axis2=2)[
+            0
+        ]  # shape: (m_tot,)
 
         # Tile CG blocks exactly as in JAX logic
         cg_rep = []
         degrees_np = np.array(degrees)
         unique_degrees, counts = np.unique(degrees_np, return_counts=True)
         for d, r in zip(unique_degrees, counts):
-            block = cg_diag[indx_fn(d - 1):indx_fn(d)]  # only select CG for degree d
+            block = cg_diag[
+                indx_fn(d - 1) : indx_fn(d)
+            ]  # only select CG for degree d
             tiled = np.tile(block, r)
             cg_rep.append(tiled)
 
         cg_rep = np.concatenate(cg_rep)
-        self.register_buffer("cg_rep", torch.tensor(cg_rep, dtype=dtype, device=device))
+        self.register_buffer(
+            "cg_rep", torch.tensor(cg_rep, dtype=dtype, device=device)
+        )
 
         # Segment IDs
-        segment_ids = list(it.chain(*[[n] * (2 * degrees[n] + 1) for n in range(len(degrees))]))
-        self.register_buffer("segment_ids", torch.tensor(segment_ids, dtype=torch.long, device=device))
+        segment_ids = list(
+            it.chain(
+                *[[n] * (2 * degrees[n] + 1) for n in range(len(degrees))]
+            )
+        )
+        self.register_buffer(
+            "segment_ids",
+            torch.tensor(segment_ids, dtype=torch.long, device=device),
+        )
 
     def forward(self, sphc: torch.Tensor) -> torch.Tensor:
         """
@@ -89,9 +109,13 @@ class L0Contraction(nn.Module):
         weighted = sphc * sphc * self.cg_rep[None, :]  # (B, m_tot)
 
         flat = weighted.reshape(-1)
-        batch_ids = torch.arange(B, device=sphc.device).repeat_interleave(m_tot)
+        batch_ids = torch.arange(B, device=sphc.device).repeat_interleave(
+            m_tot
+        )
         seg_ids = self.segment_ids.repeat(B)
         scatter_ids = batch_ids * self.num_segments + seg_ids
 
-        out = scatter_sum(flat, index=scatter_ids, dim=0, dim_size=B * self.num_segments)
+        out = scatter_sum(
+            flat, index=scatter_ids, dim=0, dim_size=B * self.num_segments
+        )
         return out.view(B, self.num_segments)

@@ -1,13 +1,13 @@
 {
     "data": {
-        "avg_num_neighbors": 52.6875
+        "avg_num_neighbors": 38.59375
     },
     "model": {
         "activation_fn": "silu",
-        "avg_num_neighbors": 52.6875,
-        "cutoff": 5.0,
+        "avg_num_neighbors": 38.59375,
+        "cutoff": 4.5,
         "cutoff_fn": "cosine",
-        "cutoff_lr": null,
+        "cutoff_lr": 12.0,
         "degrees": [
             1,
             2,
@@ -15,9 +15,9 @@
             4
         ],
         "dispersion_energy_bool": false,
-        "dispersion_energy_cutoff_lr_damping": null,
+        "dispersion_energy_cutoff_lr_damping": 2.0,
         "dispersion_energy_scale": 1.2,
-        "electrostatic_energy_bool": false,
+        "electrostatic_energy_bool": true,
         "electrostatic_energy_scale": 4.0,
         "energy_activation_fn": "silu",
         "energy_learn_atomic_type_scales": true,
@@ -42,7 +42,7 @@
         "return_representations_bool": false,
         "use_charge_embed": true,
         "use_spin_embed": true,
-        "zbl_repulsion_bool": false
+        "zbl_repulsion_bool": true
     },
     "neighborlist_format_lr": "sparse"
 }

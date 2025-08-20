@@ -5,13 +5,98 @@ from mace import data
 from ase.io import read
 from mace.modules.utils import compute_avg_num_neighbors
 from torch.fx.experimental.proxy_tensor import make_fx
-from typing import Dict, Sequence, List, Optional, Any, Final
+from typing import Dict, Sequence, List, Optional, Any, Final, Callable, Union
 import contextlib
 import math
 import difflib
 import os
 import uuid
 
+def _pt2_compile_error_message(key, tol, err, absval, model_dtype):
+    return f"Compilation check MaxAbsError: {err:.6g} (tol: {tol}) for field `{key}`. This assert was triggered because the outputs of an eager model and a compiled model numerically differ above the specified tolerance. This may indicate a compilation error (bug) specific to certain machines and installation environments, or may be an artefact of poor initialization if the error is close to the tolerance. Note that the largest absolute (MaxAbs) entry of the model prediction is {absval:.6g} -- you can use this detail to discern if it is a numerical artefact (the errors could be large because the MaxAbs value is very large) or a more fundamental compilation error. Raise a GitHub issue if you believe it is a compilation error or are unsure. If you are confident that it is purely numerical, and want to bypass the tolerance check, you may set the following environment variables: `NEQUIP_FLOAT64_MODEL_TOL`, `NEQUIP_FLOAT32_MODEL_TOL`, or `NEQUIP_TF32_MODEL_TOL`, depending on the model dtype you are using (which is currently {model_dtype}) and whether TF32 is on."
+
+
+def dtype_to_name(name: Union[str, torch.dtype]) -> torch.dtype:
+    if isinstance(name, str):
+        return name
+    return {torch.float32: "float32", torch.float64: "float64"}[name]
+
+# === floating point tolerances as env vars ===
+_FLOAT64_MODEL_TOL: Final[float] = float(
+    os.environ.get("NEQUIP_FLOAT64_MODEL_TOL", 1e-12)
+)
+_FLOAT32_MODEL_TOL: Final[float] = float(
+    os.environ.get("NEQUIP_FLOAT32_MODEL_TOL", 5e-5)
+)
+_TF32_MODEL_TOL: Final[float] = float(os.environ.get("NEQUIP_TF32_MODEL_TOL", 2e-3))
+
+
+def floating_point_tolerance(model_dtype: Union[str, torch.dtype]):
+    """
+    Consistent set of floating point tolerances for sanity checking based on ``model_dtype``, that also accounts for TF32 state.
+
+    Assumes global dtype if ``float64``, and that TF32 will only ever be used if ``model_dtype`` is ``float32``.
+    """
+    using_tf32 = False
+    if torch.cuda.is_available():
+        # assume that both are set to be the same
+        assert torch.backends.cuda.matmul.allow_tf32 == torch.backends.cudnn.allow_tf32
+        using_tf32 = torch.torch.backends.cuda.matmul.allow_tf32
+    return {
+        torch.float32: _TF32_MODEL_TOL if using_tf32 else _FLOAT32_MODEL_TOL,
+        "float32": _TF32_MODEL_TOL if using_tf32 else _FLOAT32_MODEL_TOL,
+        torch.float64: _FLOAT64_MODEL_TOL,
+        "float64": _FLOAT64_MODEL_TOL,
+    }[model_dtype]
+    
+def _default_error_message(key, tol, err, absval, model_dtype):
+    return f"MaxAbsError: {err:.6g} (tol: {tol} for {model_dtype} model) for field `{key}`. MaxAbs value: {absval:.6g}."
+
+_NUM_EVAL_TRIALS = 5
+
+def test_model_output_similarity_by_dtype(
+    model1: Callable,
+    model2: Callable,
+    data: Dict[str, torch.Tensor],
+    model_dtype: Union[str, torch.dtype],
+    fields: Optional[List[str]] = None,
+    error_message: Callable = _default_error_message,
+):
+    """
+    Assumptions and behavior:
+    - `model1` and `model2` have signature `AtomicDataDict -> AtomicDataDict`
+    - if `fields` are not provided, the function will loop over `model1`'s output keys
+    """
+    tol = floating_point_tolerance(model_dtype)
+
+    # do one evaluation to figure out the fields if not provided
+    if fields is None:
+        fields = model1(data.copy()).keys()
+
+    # perform `_NUM_EVAL_TRIALS` evaluations with each model and average to account for numerical randomness
+    out1_list, out2_list = {k: [] for k in fields}, {k: [] for k in fields}
+    for _ in range(_NUM_EVAL_TRIALS):
+        out1 = model1(data.copy())
+        out2 = model2(data.copy())
+        for k in fields:
+            out1_list[k].append(out1[k].detach().double())
+            out2_list[k].append(out2[k].detach().double())
+        del out1, out2
+
+    for k in fields:
+        t1, t2 = (
+            torch.mean(torch.stack(out1_list[k], -1), -1),
+            torch.mean(torch.stack(out2_list[k], -1), -1),
+        )
+        err = torch.max(torch.abs(t1 - t2)).item()
+        absval = t1.abs().max().item()
+
+        assert torch.allclose(t1, t2, atol=tol, rtol=tol), error_message(
+            k, tol, err, absval, model_dtype
+        )
+
+        del t1, t2, err, absval
+        
 def highlight_code_differences(code1, code2):
     differ = difflib.Differ()
     diff = list(differ.compare(code1.splitlines(), code2.splitlines()))
@@ -133,7 +218,7 @@ class ListInputOutputStateDictWrapper(ListInputOutputWrapper):
                 buffer.data.copy_(state_dict[name])
         output_dict = self.model(input_dict)
         return _list_from_dict(self.output_keys, output_dict)
-    
+
 @contextlib.contextmanager
 def fx_duck_shape(enabled: bool):
     """
@@ -160,10 +245,322 @@ def _model_make_fx(model, inputs):
             _error_on_data_dependent_ops=True,
         )(*[i.clone() for i in inputs])
         
+class CompiledModel(So3krates):
+    """Wrapper that uses ``torch.compile`` to optimize the wrapped module while allowing it to be trained."""
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        model_config: dict
+    ) -> None:
+        super().__init__(**model_config)
+        # these will be updated when the model is compiled
+        self._compiled_model = ()
+        self.model = model
+        self.input_fields = None
+        self.output_fields = None
+        # weights and buffers should be done lazily because model modification can happen after instantiation
+        # such that parameters and buffers may change between class instantiation and the lazy compilation in the `forward`
+        self.weight_names = None
+        self.buffer_names = None
+        self.output_keys = [
+            "energy",
+            "forces",
+            "virials",
+            "stress",
+            "hessian",
+            "edge_forces"
+        ]
+        self.model_dtype = torch.get_default_dtype()
+    def forward(
+        self, 
+        data: Dict[str, torch.Tensor],        
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+        compute_edge_forces: bool = False,
+        compute_atomic_stresses: bool = False,
+        lammps_mliap: bool = False,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+
+        # short-circuit if one of the batch dims is 1 (0 would be an error)
+        # this is related to the 0/1 specialization problem
+        # see https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit?fbclid=IwAR3HNwmmexcitV0pbZm_x1a4ykdXZ9th_eJWK-3hBtVgKnrkmemz6Pm5jRQ&tab=t.0#heading=h.ez923tomjvyk
+        # we just need something that doesn't have a batch dim of 1 to `make_fx` or else it'll shape specialize
+        # the models compiled for more batch_size > 1 data cannot be used for batch_size=1 data
+        # (under specific cases related to the `PerTypeScaleShift` module)
+        # for now we just make sure to always use the eager model when the data has any batch dims of 1
+        if (
+            torch.unique(batch['batch']).shape[0] < 2
+        ):
+            # use parent class's forward
+            return super().forward(data)
+
+        # === compile ===
+        # compilation happens on the first data pass when there are at least two atoms (hard to pre-emp pathological data)
+        if not self._compiled_model:
+
+            # get weight names and buffers
+            self.weight_names = [n for n, _ in self.model.named_parameters()]
+            self.buffer_names = [n for n, _ in self.model.named_buffers()]
+
+            # == get input and output fields ==
+            # use intersection of data keys and GraphModel input/outputs, which assumes
+            # - correctness of irreps registration system
+            # - all input `data` batches have the same keys, and contain all necessary inputs and reference labels (outputs)
+            self.input_fields = sorted(list(data.keys()))
+            self.output_fields = sorted(self.output_keys)
+
+            # == preprocess model and make_fx ==
+            model_to_trace = ListInputOutputStateDictWrapper(
+                model=self.model,
+                input_keys=self.input_fields,
+                output_keys=self.output_fields,
+                state_dict_keys=self.weight_names + self.buffer_names,
+            )
+
+            weights, buffers = self._get_weights_buffers()
+            fx_model = model_make_fx(
+                model=model_to_trace,
+                data=data,
+                fields=self.input_fields,
+                extra_inputs=weights + buffers,
+            )
+            del weights, buffers
+
+            # == compile exported program ==
+            # see https://pytorch.org/tutorials/intermediate/torch_export_tutorial.html#running-the-exported-program
+            # TODO: compile options
+            self._compiled_model = (
+                torch.compile(
+                    fx_model,
+                    dynamic=True,
+                    fullgraph=True,
+                ),
+            )
+            # NOTE: the compiled model is wrapped in a tuple so that it's not registered and saved in the state dict -- this is necessary to enable `GraphModel` to load `CompileGraphModel` state dicts
+            # see https://discuss.pytorch.org/t/saving-nn-module-to-parent-nn-module-without-registering-paremeters/132082/6
+
+            # run original model and compiled model with data to sanity check
+            test_model_output_similarity_by_dtype(
+                self._compiled_forward,
+                self.model,
+                {k: data[k] for k in self.input_fields},
+                dtype_to_name(self.model_dtype),
+                fields=self.output_fields,
+                error_message=_pt2_compile_error_message,
+            )
+
+        # === run compiled model ===
+        out_dict = self._compiled_forward(data)
+        to_return = {k: None for k in self.output_keys}
+        to_return.update(out_dict)
+        return to_return
+
+    def _compiled_forward(self, data):
+        # run compiled model with data
+        weights, buffers = self._get_weights_buffers()
+        data_list = _list_from_dict(self.input_fields, data)
+        out_list = self._compiled_model[0](*(data_list + weights + buffers))
+        out_dict = _list_to_dict(self.output_fields, out_list)
+        return out_dict
+
+    def _get_weights_buffers(self):
+        # get weights and buffers from trainable model
+        weight_dict = dict(self.model.named_parameters())
+        weights = [weight_dict[name] for name in self.weight_names]
+        buffer_dict = dict(self.model.named_buffers())
+        buffers = [buffer_dict[name] for name in self.buffer_names]
+        return weights, buffers
+
+def model_make_fx(
+    model: torch.nn.Module,
+    data: Dict[str, torch.Tensor],
+    fields: List[str],
+    extra_inputs: List[torch.Tensor] = [],
+    seed: int = 1,
+):
+    """
+    Args:
+        model (torch.nn.Module): model must only take in flat ``torch.Tensor`` inputs
+        data (AtomicDataDict.Type): an ``AtomicDataDict``
+        fields (List[str]): ``AtomicDataDict`` fields that are used as the flat inputs to model
+        extra_inputs (List[torch.Tensor]): list of additional ``torch.Tensor`` input data that are not ``AtomicDataDict`` fields
+        seed (int): optional seed for reproducibility
+    """
+    # we do it twice
+    # 1. once with the original input data
+    test_data_list = [data[key] for key in fields]
+    fx_model = _model_make_fx(model, test_data_list + extra_inputs)
+
+    # 2. Follow NequIP's approach: extract first graph, augment it, combine back
+    device = data['positions'].device
+    generator = torch.Generator(device).manual_seed(seed)
+
+    # Extract the first graph from the batch
+    def extract_first_graph(batch_data):
+        """Extract the first graph from a batched PyG-style data structure"""
+        first_graph_mask = batch_data['batch'] == 0
+        num_first_graph_nodes = first_graph_mask.sum().item()
+        
+        # Find edges belonging to the first graph
+        edge_mask = (first_graph_mask[batch_data['edge_index'][0]] &
+                     first_graph_mask[batch_data['edge_index'][1]])
+        
+        single_graph = {}
+        for key, value in batch_data.items():
+            if key == 'edge_index':
+                # Extract edges and remap indices to start from 0
+                edges = value[:, edge_mask]
+                node_mapping = torch.zeros(
+                    len(first_graph_mask),
+                    dtype=torch.long, device=value.device)
+                node_mapping[first_graph_mask] = torch.arange(
+                    num_first_graph_nodes, device=value.device)
+                single_graph[key] = node_mapping[edges]
+            elif key in ['shifts', 'unit_shifts']:  # Edge-level features
+                single_graph[key] = value[edge_mask]
+            elif key in ['charges', 'positions', 'forces', 'node_attrs']:
+                # Node-level features
+                single_graph[key] = value[first_graph_mask]
+            elif key == 'batch':
+                # Create new batch tensor for single graph
+                single_graph[key] = torch.zeros(
+                    num_first_graph_nodes, dtype=value.dtype, device=value.device)
+            elif key == 'ptr':
+                # Update ptr for single graph
+                single_graph[key] = torch.tensor(
+                    [0, num_first_graph_nodes], dtype=value.dtype,
+                    device=value.device)
+            else:  # Graph-level features - take first graph's values
+                if (len(value.shape) > 0 and
+                        value.shape[0] == batch_data['batch'].max().item() + 1):
+                    single_graph[key] = value[0:1]  # Keep batch dimension
+                else:
+                    single_graph[key] = value
+        
+        return single_graph
+
+    single_frame = extract_first_graph(data)
+
+    # Apply node removal to the single graph
+    num_nodes = single_frame['positions'].shape[0]
+    node_idx = torch.randint(
+        low=0,
+        high=num_nodes,
+        size=(max(2, math.ceil(num_nodes * 0.1)),),
+        generator=generator,
+        device=device,
+    )
+
+    def without_nodes(data_single, which_nodes):
+        """Remove nodes from a single graph"""
+        num_nodes_single = data_single['positions'].shape[0]
+        node_mask = torch.ones(num_nodes_single, dtype=torch.bool, device=device)
+        node_mask[which_nodes] = False
+        
+        # Edge mask: keep edges where both endpoints are kept
+        edge_idx = data_single['edge_index']
+        edge_mask = node_mask[edge_idx[0]] & node_mask[edge_idx[1]]
+        
+        # Create index mapping for remaining nodes
+        new_index = torch.full(
+            (num_nodes_single,), fill_value=-1,
+            dtype=torch.long, device=device)
+        new_index[node_mask] = torch.arange(
+            node_mask.sum(), dtype=torch.long, device=device)
+        
+        new_dict = {}
+        for key, value in data_single.items():
+            if key == 'edge_index':
+                filtered_edges = edge_idx[:, edge_mask]
+                new_dict[key] = new_index[filtered_edges]
+            elif key in ['shifts', 'unit_shifts']:  # Edge-level features
+                new_dict[key] = value[edge_mask]
+            elif key in ['charges', 'positions', 'forces', 'node_attrs']:
+                # Node-level features
+                new_dict[key] = value[node_mask]
+            elif key == 'batch':
+                new_dict[key] = torch.zeros(
+                    node_mask.sum(), dtype=value.dtype, device=device)
+            elif key == 'ptr':
+                new_dict[key] = torch.tensor(
+                    [0, node_mask.sum()], dtype=value.dtype, device=device)
+            else:  # Graph-level features
+                new_dict[key] = value
+        
+        return new_dict
+
+    augmented_single = without_nodes(single_frame, node_idx)
+
+    # Combine original batch with augmented single graph (NequIP approach)
+    def combine_batch_with_single(original_batch, single_graph):
+        """Combine original batch with an additional single graph"""
+        combined = {}
+        
+        # Get dimensions
+        orig_num_nodes = original_batch['positions'].shape[0]
+        single_num_nodes = single_graph['positions'].shape[0]
+        orig_num_graphs = original_batch['batch'].max().item() + 1
+        
+        for key, orig_value in original_batch.items():
+            single_value = single_graph[key]
+            
+            if key == 'edge_index':
+                # Shift single graph edge indices
+                shifted_edges = single_value + orig_num_nodes
+                combined[key] = torch.cat([orig_value, shifted_edges], dim=1)
+            elif key in ['shifts', 'unit_shifts']:  # Edge-level features
+                combined[key] = torch.cat([orig_value, single_value], dim=0)
+            elif key in ['charges', 'positions', 'forces', 'node_attrs']:
+                # Node-level features
+                combined[key] = torch.cat([orig_value, single_value], dim=0)
+            elif key == 'batch':
+                # Assign new batch index to single graph
+                new_batch_idx = torch.full(
+                    (single_num_nodes,), orig_num_graphs,
+                    dtype=orig_value.dtype, device=orig_value.device)
+                combined[key] = torch.cat([orig_value, new_batch_idx], dim=0)
+            elif key == 'ptr':
+                # Update ptr to include new graph
+                new_ptr = torch.tensor(
+                    [orig_num_nodes + single_num_nodes],
+                    dtype=orig_value.dtype, device=orig_value.device)
+                combined[key] = torch.cat([orig_value, new_ptr])
+            else:  # Graph-level features
+                if (len(orig_value.shape) > 0 and
+                        orig_value.shape[0] == orig_num_graphs):
+                    combined[key] = torch.cat([orig_value, single_value], dim=0)
+                else:
+                    combined[key] = orig_value  # Keep as-is for scalar features
+        
+        return combined
+
+    augmented_data = combine_batch_with_single(data, augmented_single)
+    augmented_data_list = [augmented_data[key] for key in fields]
+    augmented_fx_model = _model_make_fx(
+        model, 
+        augmented_data_list + extra_inputs
+        )
+    
+    del augmented_data, augmented_single, single_frame, node_idx
+
+    # because we use different batch dims for each fx model,
+    # check that the fx graphs are identical to ensure that `make_fx` didn't shape-specialize
+    check_make_fx_diff(fx_model, augmented_fx_model, fields)
+
+    # clean up
+    torch.cuda.empty_cache()
+
+    return fx_model
+
 
 seed = 42
 
 mol = read('./ala4.xyz')
+
 r_max = 5.0
 charge = 3
 mol.info["total_charge"] = charge
@@ -176,6 +573,7 @@ z_table = utils.AtomicNumberTable(
             [int(z) for z in range(1, 119)]
         )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'
 print(f"Using device: {device}")
 
 dtype = 'float32'  # or torch.float64, depending on your model's requirements
@@ -195,7 +593,7 @@ data_loader = torch_geometric.dataloader.DataLoader(
             cutoff=r_max,
         )
     ],
-    batch_size=1,
+    batch_size=2,
     shuffle=False,
     drop_last=False,
 )
@@ -204,7 +602,7 @@ avg_num_neighbors = compute_avg_num_neighbors(
 )
 
 batch = next(iter(data_loader)).to(device)
-#print(batch.to_dict().keys())
+
 degrees = [1,2,3,4]
 model = So3krates(
     r_max=5.0,
@@ -233,6 +631,40 @@ model = So3krates(
 batch = batch.to_dict()
 result = model(batch)
 
+model_conig = dict(
+    r_max=5.0,
+    num_radial_basis=32,
+    degrees=degrees,
+    features_dim=132,
+    num_att_heads=4,
+    final_mlp_layers=2,  # TODO: check, does the last layer count?
+    num_interactions=1,
+    num_elements=len(z_table),
+    avg_num_neighbors=avg_num_neighbors,
+    message_normalization='avg_num_neighbors',
+    seed=42,
+    device=device,
+    trainable_rbf=True,
+    learn_atomic_type_shifts=True,
+    learn_atomic_type_scales=True,
+    energy_regression_dim=66,  # This is the energy regression dimension
+    layer_normalization_1=True,
+    layer_normalization_2=True,
+    residual_mlp_1=True,
+    residual_mlp_2=True,
+    use_charge_embed=False,
+    use_spin_embed=False,
+)
+
+#compiled_model = CompiledModel(
+#    model=model,
+#    model_config=model_conig
+#)
+#compiled_model(batch)
+
+
+
+
 input_fields = sorted(list(batch.keys()))
 output_fields = sorted(list(result.keys()))
 weight_names = [n for n, _ in model.named_parameters()]
@@ -248,80 +680,24 @@ weights, buffers = _get_weights_buffers(model, weight_names, buffer_names)
 
 test_data_list = [batch[key] for key in input_fields]
 
-total_input_list = test_data_list + weights + buffers
-#model_to_trace(*total_input_list)
 
 
-fx_model = _model_make_fx(model_to_trace, total_input_list)
-
-
-generator = torch.Generator(device).manual_seed(seed)
-num_nodes = batch['positions'].shape[0]
-node_idx = torch.randint(
-    low=0,
-    high=num_nodes,
-    size=(max(2, math.ceil(num_nodes * 0.1)),),
-    generator=generator,
-    device=device,
-)
-node_mask = torch.ones(num_nodes, dtype=torch.bool, device=device)
-node_mask[node_idx] = False
-edge_idx = batch['edge_index']
-edge_mask = node_mask[edge_idx[0]] & node_mask[edge_idx[1]]
-new_index = torch.full(
-    (num_nodes,),
-    fill_value=-1,
-    dtype=torch.long,
-    device=device,
-)
-new_index[node_mask] = torch.arange(
-    node_mask.sum(),
-    dtype=torch.long,
-    device=device,
-)
-
-new_dict = {}
-for key, value in batch.items():
-    if key == 'edge_index':
-        # Filter edges and update indices
-        filtered_edge_index = edge_idx[:, edge_mask]
-        new_dict[key] = torch.stack([
-            new_index[filtered_edge_index[0]],
-            new_index[filtered_edge_index[1]]
-        ])
-    elif key in ['shifts', 'unit_shifts']:
-        # Filter edge-level features using edge_mask
-        new_dict[key] = value[edge_mask]
-    elif key == 'batch':
-        # Filter batch indices for nodes
-        new_dict[key] = value[node_mask]
-    elif key in ['charges', 'positions', 'forces', 'node_attrs']:
-        # Filter node-level features
-        new_dict[key] = value[node_mask]
-    elif key == 'ptr':
-        # Update ptr to reflect new node count
-        new_dict[key] = torch.tensor([0, node_mask.sum()], dtype=value.dtype, device=device)
-    else:
-        # Keep graph-level properties unchanged
-        new_dict[key] = value
-
-augmented_data_list = [new_dict[key] for key in input_fields]
-total_augmented_list = augmented_data_list + weights + buffers
-augmented_fx_model = _model_make_fx(model_to_trace, total_augmented_list)
-
-torch.cuda.empty_cache()
-
-check_make_fx_diff(fx_model, augmented_fx_model, input_fields)
-
-#torch._dynamo.config.capture_dynamic_output_shape_ops = True
+# torch._dynamo.config.capture_dynamic_output_shape_ops = True
 fx = True
 if fx:
+    fx_model = model_make_fx(
+        model=model_to_trace,
+        data=batch,
+        fields=input_fields,
+        extra_inputs=weights + buffers,
+        seed=seed,
+    )
     compiled_model = torch.compile(
         fx_model,
         dynamic=True,
         fullgraph=True
     )
-#compiled_model(batch)
+    # compiled_model(batch)
 
     out = compiled_model(
         *(test_data_list + weights + buffers)
@@ -335,11 +711,11 @@ else:
     out = compiled_model(batch)
 
 print("Compiled model output:")
-print(out,"\n")
+print(out, "\n")
 out = model(batch)
 print("Original model output:")
 print(out)
 exit()
 
-#print(out)
-#print(fx_model)
+# print(out)
+# print(fx_model)

@@ -1,10 +1,10 @@
 import torch
 from e3nn.util.jit import compile_mode
-from e3nn import o3
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 from torch.nn import Parameter
 from torch.nn import Module
 import math
+
 
 @compile_mode("script")
 class GaussianBasis(Module):
@@ -26,32 +26,22 @@ class GaussianBasis(Module):
             self.centers = Parameter(centers)
             self.widths = Parameter(widths)
         else:
-            self.register_buffer("centers", centers)
-            self.register_buffer("widths", widths)
+            self.register_buffer("centers", centers)#, persistent=False)
+            self.register_buffer("widths", widths)#, persistent=False)
 
-    def _init_centers(
-        self,
-        min: float,
-        max: float,
-        n: int
-    ) -> torch.Tensor:
+    def _init_centers(self, min: float, max: float, n: int) -> torch.Tensor:
         return torch.linspace(min, max, n)
 
-    def _init_widths(
-        self,
-        centers: torch.Tensor
-    ) -> torch.Tensor:
+    def _init_widths(self, centers: torch.Tensor) -> torch.Tensor:
         delta = torch.abs(centers[1] - centers[0])
         return torch.full_like(centers, delta)
 
-    def forward(
-        self,
-        distances: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, distances: torch.Tensor) -> torch.Tensor:
         d = distances.unsqueeze(-1)  # shape [..., 1]
         return torch.exp(
-            -0.5 / (self.widths ** 2) * (d - self.centers) ** 2
+            -0.5 / (self.widths**2) * (d - self.centers) ** 2
         ).squeeze()
+
 
 @compile_mode("script")
 class BernsteinBasis(Module):
@@ -81,20 +71,23 @@ class BernsteinBasis(Module):
             self.register_buffer("gamma", gamma_tensor)
 
     def forward(self, distances: torch.Tensor) -> torch.Tensor:
-        # Compute e^{-gamma * r}, clamp for numerical safety
         exp_r = torch.exp(-self.gamma * distances)
-        exp_r = torch.clamp(exp_r, min=self.eps, max=1.0 - self.eps)  # avoid log(0), log(1)
+        exp_r = torch.clamp(
+            exp_r, min=self.eps, max=1.0 - self.eps
+        )
+        x = exp_r
+        k_log_x = self.k * torch.log(x) 
+        k_rev_log_1_minus_x = self.k_rev * torch.log(1 - x)
 
-        x = exp_r.unsqueeze(-1)  # shape (..., 1) -> (..., 1, 1)
-        k_log_x = self.k * torch.log(x)            # (..., 1, K)
-        k_rev_log_1_minus_x = self.k_rev * torch.log(1 - x)  # (..., 1, K)
-
-        log_poly = self.b + k_log_x + k_rev_log_1_minus_x  # broadcasting (..., K)
-        return torch.exp(log_poly)  # (..., K)
+        log_poly = (
+            self.b + k_log_x + k_rev_log_1_minus_x
+        )
+        return torch.exp(log_poly) 
 
 
 def log_binomial_coefficient(n: int, k: int) -> float:
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+
 
 @compile_mode("script")
 class BesselBasis(Module):
@@ -122,11 +115,10 @@ class BesselBasis(Module):
 
     def forward(self, r: torch.Tensor) -> torch.Tensor:
         r_clamped = torch.clamp(r, min=self.eps)  # prevent divide-by-zero
-        r_expanded = r_clamped.unsqueeze(-1)  # (..., 1)
 
         # sin(freq * r) / r
-        sin_term = torch.sin(self.freqs * r_expanded)  # (..., n_rbf)
-        output = sin_term / r_expanded  # (..., n_rbf)
+        sin_term = torch.sin(self.freqs * r_clamped)  # (..., n_rbf)
+        output = sin_term / r_clamped  # (..., n_rbf)
 
         return output
 
@@ -134,12 +126,12 @@ class BesselBasis(Module):
 @compile_mode("script")
 class ComputeRBF(Module):
     def __init__(
-            self,
-            r_max: float,
-            num_radial_basis: int,
-            trainable: bool = True,
-            radial_basis_fn: str = "gaussian"
-        ):
+        self,
+        r_max: float,
+        num_radial_basis: int,
+        trainable: bool = True,
+        radial_basis_fn: str = "gaussian",
+    ):
         super().__init__()
 
         radial_basis_fn = radial_basis_fn.lower()
@@ -148,7 +140,7 @@ class ComputeRBF(Module):
             "bernstein",
             "bessel",
         ], f"Radial basis '{radial_basis_fn}' is not supported. Choose from 'gaussian', 'bernstein', or 'bessel'."
-        
+
         if radial_basis_fn == "gaussian":
             self.radial_basis_fn = GaussianBasis(
                 r_max=r_max,
@@ -156,7 +148,7 @@ class ComputeRBF(Module):
                 trainable=trainable,
             )
         elif radial_basis_fn == "bernstein":
-            self.radial_basis = BernsteinBasis(
+            self.radial_basis_fn = BernsteinBasis(
                 n_rbf=num_radial_basis,
                 r_cut=r_max,
                 trainable_gamma=trainable,
@@ -167,5 +159,6 @@ class ComputeRBF(Module):
                 r_cut=r_max,
                 trainable_freqs=trainable,
             )
+
     def forward(self, distances: torch.Tensor) -> torch.Tensor:
         return self.radial_basis_fn(distances)

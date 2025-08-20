@@ -1,4 +1,5 @@
-from so3krates_torch.modules.models import So3krates
+from so3krates_torch.data.atomic_data import AtomicData as So3Data
+from so3krates_torch.modules.models import So3krates, SO3LR
 from mace.tools import torch_geometric, utils
 from ase.build import molecule
 import torch
@@ -9,14 +10,20 @@ from ase.io import read
 from mace.modules.utils import compute_avg_num_neighbors
 from mace.calculators import mace_mp
 from so3krates_torch.tools.compile import prepare
+import numpy as np
+from math import inf
+import sys
 
 def nan_hook(module, input, output):
     if torch.isnan(output).any():
         print(f"NaN in module: {module.__class__.__name__}")
 
 mol = molecule('H2O')
-rmol = read('./water_64.xyz')
-r_max = 5.0
+mol = read('So3krates-torch/example/water_64.xyz')
+mol = read('So3krates-torch/example/ala15.xyz')
+r_max = 4.5
+#r_max_lr = float(10e6)
+r_max_lr = 10.0
 charge = 3
 mol.info["total_charge"] = charge
 mol.info["total_spin"] = 0.5
@@ -28,6 +35,7 @@ z_table = utils.AtomicNumberTable(
             [int(z) for z in range(1, 119)]
         )
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cpu'
 print(f"Using device: {device}")
 
 dtype = 'float32'  # or torch.float64, depending on your model's requirements
@@ -41,10 +49,11 @@ config = data.config_from_atoms(
 )
 data_loader = torch_geometric.dataloader.DataLoader(
     dataset=20*[
-        data.AtomicData.from_config(
+        So3Data.from_config(
             config,
             z_table=z_table,
             cutoff=r_max,
+            cutoff_lr=r_max_lr,
         )
     ],
     batch_size=1,
@@ -57,39 +66,74 @@ avg_num_neighbors = compute_avg_num_neighbors(
 
 batch = next(iter(data_loader)).to(device)
 
+print(batch['edge_index'][0].shape)
+print(batch['edge_index_lr'][0].shape)
+
 #mace_mp_model_medium= mace_mp()
 #mace_mp_model_small = mace_mp(model='small')
 
 degrees = [1,2,3,4]
-model = So3krates(
-    r_max=5.0,
-    num_radial_basis=32,
-    degrees=degrees,
-    features_dim=132,
-    num_att_heads=4,
-    final_mlp_layers=2,  # TODO: check, does the last layer count?
-    num_interactions=1,
-    num_elements=len(z_table),
-    avg_num_neighbors=avg_num_neighbors,
-    message_normalization='avg_num_neighbors',
-    seed=42,
-    device=device,
-    trainable_rbf=True,
-    learn_atomic_type_shifts=True,
-    learn_atomic_type_scales=True,
-    energy_regression_dim=66,  # This is the energy regression dimension
-    layer_normalization_1=True,
-    layer_normalization_2=True,
-    residual_mlp_1=True,
-    residual_mlp_2=True,
-    use_charge_embed=True,
-    use_spin_embed=True,
-)
+use_so3krates = False  # Set to False to use SO3LR
+if use_so3krates:
+    model = So3krates(
+        r_max=r_max,
+        num_radial_basis=32,
+        degrees=degrees,
+        features_dim=132,
+        num_att_heads=4,
+        final_mlp_layers=2,  # TODO: check, does the last layer count?
+        num_interactions=1,
+        num_elements=len(z_table),
+        avg_num_neighbors=avg_num_neighbors,
+        message_normalization='avg_num_neighbors',
+        seed=42,
+        device=device,
+        trainable_rbf=True,
+        learn_atomic_type_shifts=True,
+        learn_atomic_type_scales=True,
+        energy_regression_dim=66,  # This is the energy regression dimension
+        layer_normalization_1=True,
+        layer_normalization_2=True,
+        residual_mlp_1=True,
+        residual_mlp_2=True,
+        use_charge_embed=True,
+        use_spin_embed=True,
+    )
+else:
+    model = SO3LR(
+        r_max=r_max,
+        r_max_lr=r_max_lr,
+        num_radial_basis=32,
+        degrees=degrees,
+        features_dim=132,
+        num_att_heads=4,
+        final_mlp_layers=2,  # TODO: check, does the last layer count?
+        num_interactions=1,
+        num_elements=len(z_table),
+        avg_num_neighbors=avg_num_neighbors,
+        message_normalization='avg_num_neighbors',
+        seed=42,
+        device=device,
+        trainable_rbf=True,
+        learn_atomic_type_shifts=True,
+        learn_atomic_type_scales=True,
+        energy_regression_dim=66,  # This is the energy regression dimension
+        layer_normalization_1=True,
+        layer_normalization_2=True,
+        residual_mlp_1=True,
+        residual_mlp_2=True,
+        use_charge_embed=True,
+        use_spin_embed=True,
+        zbl_repulsion_bool=True,
+        electrostatic_energy_bool=True,
+        dispersion_energy_bool=True,
+        dispersion_energy_cutoff_lr_damping=2.0,
+        radial_basis_fn='bernstein'
+
+    )
+
 model.to(device).eval()
-def print_hook(name):
-    def hook(m, inp, out):
-        print(f"{name}: mean={out}")
-    return hook
+
 #model.register_forward_hook(print_hook("some_block"))
 # print model parameters
 if False:
@@ -106,11 +150,16 @@ if False:
 #)
 
 batch["positions"].requires_grad_(True)
+batch["atomic_numbers"] = torch.argmax(batch["node_attrs"], dim=-1) + 1
+
 torch._dynamo.config.suppress_errors = False
 #scripted_model = jit.compile(model)
-result = model(batch)
-print(f"Not compiled: Energy: {result['energy'].item():.4f}")
-
+result = model(batch.to_dict(),compute_stress=True)
+print(f"Not compiled: Energy: {result['energy'].item():.12f}")
+print(f'Dipole vector: {result["dipole_vec"]}')
+print(f'Forces mean: {result["forces"].mean(dim=0)}')
+print(f'stress: {result["stress"]}')
+print(f'hirshfeld_ratios: {result["hirshfeld_ratios"]}')
 
 exit()
 
