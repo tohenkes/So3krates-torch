@@ -136,7 +136,7 @@ model.to(device).eval()
 
 #model.register_forward_hook(print_hook("some_block"))
 # print model parameters
-if False:
+if True:
     print(f"Number of parameters in the model: {sum(p.numel() for p in model.parameters())}")
     for name, param in model.named_parameters():
         if param.requires_grad:

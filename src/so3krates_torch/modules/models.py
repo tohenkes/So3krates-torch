@@ -309,7 +309,6 @@ class So3krates(torch.nn.Module):
             compute_edge_forces=compute_edge_forces,
             lammps_mliap=lammps_mliap,
         )
-
         ######### OUTPUT #########
         atomic_energies = self.atomic_energy_output_block(
             inv_features,
@@ -435,6 +434,7 @@ class SO3LR(So3krates):
         compute_displacement: bool = False,
         compute_hessian: bool = False,
         compute_edge_forces: bool = False,
+        return_descriptors: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
@@ -554,5 +554,8 @@ class SO3LR(So3krates):
             ),
             "hirshfeld_ratios": (
                 hirshfeld_ratios if self.dispersion_energy_bool else None
+            ),
+            "descriptors": (
+                inv_features if return_descriptors else None
             )
         }

@@ -42,24 +42,21 @@ def main():
     argparser.add_argument(
         "--so3lr",
         type=bool,
-        action='store_true',
+        default=True,
         help="Flag to indicate if the model is SO3LR"
     )
     argparser.add_argument(
         "--use_defined_shifts",
-        type=bool,
         action='store_true',
         help="Flag to indicate if defined shifts should be used"
     )
     argparser.add_argument(
         "--trainable_rbf",
-        type=bool,
         action='store_true',
         help="Flag to indicate if the RBF is trainable"
     )
     argparser.add_argument(
         "--dtype",
-        type=str,
         default="float32",
         help="Data type to use for the model parameters"
     )
@@ -78,17 +75,15 @@ def main():
         dtype=dtype,
         so3lr=args.so3lr,
         use_defined_shifts=args.use_defined_shifts,
-        trainable_rbf=args.trainable_rbf
+        trainable_rbf=args.trainable_rbf,
+        save_torch_settings=args.save_settings_path
     )
 
-    if args.save_settings_path is not None:
-        model.save_settings(args.save_settings_path)
-
     if args.save_state_dict_path is not None:
-        model.save_state_dict(args.save_state_dict_path)
+        torch.save(model.state_dict(), args.save_state_dict_path)
 
     if args.save_model_path is not None:
-        model.save(args.save_model_path)
+        torch.save(model, args.save_model_path)
 
     return 0
 

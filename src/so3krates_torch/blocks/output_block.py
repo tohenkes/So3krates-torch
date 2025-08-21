@@ -125,7 +125,7 @@ class PartialChargesOutputHead(nn.Module):
         self,
         num_features: int,
         regression_dim: Optional[int] = None,
-        activation_fn: Callable[[torch.Tensor], torch.Tensor] = lambda u: u,
+        activation_fn: torch.nn.Module = torch.nn.Identity,
     ):
         super().__init__()
 
@@ -211,7 +211,7 @@ class HirshfeldOutputHead(nn.Module):
         self,
         num_features: int,
         regression_dim: Optional[int] = None,
-        activation_fn: Callable[[torch.Tensor], torch.Tensor] = lambda u: u,
+        activation_fn: torch.nn.Module = torch.nn.Identity,
     ):
         super().__init__()
 

@@ -30,5 +30,9 @@ homepage = "https://github.com/tohenkes/So3krates-torch"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+so3krates_torch = ["pretrained/so3lr/so3lr.model"]
+
 [project.scripts]
 torchkrates-jax2torch = "so3krates_torch.cli.jax_to_torch:main"
+torchkrates-torch2jax = "so3krates_torch.cli.torch_to_jax:main"

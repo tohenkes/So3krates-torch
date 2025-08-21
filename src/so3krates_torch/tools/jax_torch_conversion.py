@@ -133,16 +133,16 @@ def get_flax_to_torch_mapping(
         
         # Residual MLPs
         if residual_mlp_1:
-            mapping[f"params/layers_{i}/res_mlp_1_layer_1/kernel"] = f"{torch_prefix}.residual_mlp_1.1.weight"
-            mapping[f"params/layers_{i}/res_mlp_1_layer_1/bias"] = f"{torch_prefix}.residual_mlp_1.1.bias"
-            mapping[f"params/layers_{i}/res_mlp_1_layer_2/kernel"] = f"{torch_prefix}.residual_mlp_1.3.weight"
-            mapping[f"params/layers_{i}/res_mlp_1_layer_2/bias"] = f"{torch_prefix}.residual_mlp_1.3.bias"
+            mapping[f"params/layers_{i}/res_mlp_1_layer_1/kernel"] = f"{torch_prefix}.mlp_1.1.weight"
+            mapping[f"params/layers_{i}/res_mlp_1_layer_1/bias"] = f"{torch_prefix}.mlp_1.1.bias"
+            mapping[f"params/layers_{i}/res_mlp_1_layer_2/kernel"] = f"{torch_prefix}.mlp_1.3.weight"
+            mapping[f"params/layers_{i}/res_mlp_1_layer_2/bias"] = f"{torch_prefix}.mlp_1.3.bias"
         if residual_mlp_2:
-            mapping[f"params/layers_{i}/res_mlp_2_layer_1/kernel"] = f"{torch_prefix}.residual_mlp_2.1.weight"
-            mapping[f"params/layers_{i}/res_mlp_2_layer_1/bias"] = f"{torch_prefix}.residual_mlp_2.1.bias"
-            mapping[f"params/layers_{i}/res_mlp_2_layer_2/kernel"] = f"{torch_prefix}.residual_mlp_2.3.weight"
-            mapping[f"params/layers_{i}/res_mlp_2_layer_2/bias"] = f"{torch_prefix}.residual_mlp_2.3.bias"
-            
+            mapping[f"params/layers_{i}/res_mlp_2_layer_1/kernel"] = f"{torch_prefix}.mlp_2.1.weight"
+            mapping[f"params/layers_{i}/res_mlp_2_layer_1/bias"] = f"{torch_prefix}.mlp_2.1.bias"
+            mapping[f"params/layers_{i}/res_mlp_2_layer_2/kernel"] = f"{torch_prefix}.mlp_2.3.weight"
+            mapping[f"params/layers_{i}/res_mlp_2_layer_2/bias"] = f"{torch_prefix}.mlp_2.3.bias"
+
     # Output layers
     mapping["params/observables_0/energy_dense_regression/kernel"] = "atomic_energy_output_block.layers.0.weight"
     mapping["params/observables_0/energy_dense_regression/bias"] = "atomic_energy_output_block.layers.0.bias"
@@ -436,16 +436,16 @@ def get_torch_to_flax_mapping(
         
         # Residual MLPs
         if residual_mlp_1:
-            mapping[f"{torch_prefix}.residual_mlp_1.1.weight"] = f"params/layers_{i}/res_mlp_1_layer_1/kernel"
-            mapping[f"{torch_prefix}.residual_mlp_1.1.bias"] = f"params/layers_{i}/res_mlp_1_layer_1/bias"
-            mapping[f"{torch_prefix}.residual_mlp_1.3.weight"] = f"params/layers_{i}/res_mlp_1_layer_2/kernel"
-            mapping[f"{torch_prefix}.residual_mlp_1.3.bias"] = f"params/layers_{i}/res_mlp_1_layer_2/bias"
+            mapping[f"{torch_prefix}.mlp_1.1.weight"] = f"params/layers_{i}/res_mlp_1_layer_1/kernel"
+            mapping[f"{torch_prefix}.mlp_1.1.bias"] = f"params/layers_{i}/res_mlp_1_layer_1/bias"
+            mapping[f"{torch_prefix}.mlp_1.3.weight"] = f"params/layers_{i}/res_mlp_1_layer_2/kernel"
+            mapping[f"{torch_prefix}.mlp_1.3.bias"] = f"params/layers_{i}/res_mlp_1_layer_2/bias"
         if residual_mlp_2:
-            mapping[f"{torch_prefix}.residual_mlp_2.1.weight"] = f"params/layers_{i}/res_mlp_2_layer_1/kernel"
-            mapping[f"{torch_prefix}.residual_mlp_2.1.bias"] = f"params/layers_{i}/res_mlp_2_layer_1/bias"
-            mapping[f"{torch_prefix}.residual_mlp_2.3.weight"] = f"params/layers_{i}/res_mlp_2_layer_2/kernel"
-            mapping[f"{torch_prefix}.residual_mlp_2.3.bias"] = f"params/layers_{i}/res_mlp_2_layer_2/bias"
-            
+            mapping[f"{torch_prefix}.mlp_2.1.weight"] = f"params/layers_{i}/res_mlp_2_layer_1/kernel"
+            mapping[f"{torch_prefix}.mlp_2.1.bias"] = f"params/layers_{i}/res_mlp_2_layer_1/bias"
+            mapping[f"{torch_prefix}.mlp_2.3.weight"] = f"params/layers_{i}/res_mlp_2_layer_2/kernel"
+            mapping[f"{torch_prefix}.mlp_2.3.bias"] = f"params/layers_{i}/res_mlp_2_layer_2/bias"
+
     # Output layers
     mapping["atomic_energy_output_block.layers.0.weight"] = "params/observables_0/energy_dense_regression/kernel"
     mapping["atomic_energy_output_block.layers.0.bias"] = "params/observables_0/energy_dense_regression/bias"
@@ -622,7 +622,7 @@ def convert_torch_to_flax_params(
     return flax_params
 
 def convert_torch_to_flax(
-    torch_model: torch.nn.Module,
+    torch_state_dict: Dict[str, Any],
     torch_settings: Dict[str, Any],
     trainable_rbf: bool = False,
     dtype: str = "float32"
@@ -641,7 +641,7 @@ def convert_torch_to_flax(
     
     # Convert parameters
     flax_params = convert_torch_to_flax_params(
-        torch_params=torch_model.state_dict(),
+        torch_params=torch_state_dict,
         mapping=mapping,
         dtype=dtype
     )

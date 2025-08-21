@@ -111,7 +111,7 @@ with open("So3krates-torch/example/so3lr/torch_model_settings.yaml", "r") as f:
     torch_settings = yaml.safe_load(f)
 
 cfg, params = convert_torch_to_flax(
-    torch_model=model,
+    torch_state_dict=model.state_dict(),
     torch_settings=torch_settings,
     dtype=dtype_str,
 )
@@ -124,7 +124,7 @@ with open("So3krates-torch/example/so3lr_torch/params.pkl", "wb") as f:
     pickle.dump(params, f)
 
 jax_calc2 = AseCalculatorSparse.create_from_workdir(
-    workdir="So3krates-torch/example/so3lr_torch",
+    workdir="/home/tobias/Uni/Promotion/Research/torchkrates/So3krates-torch/example/so3lr/test2",
     from_file=True,
     calculate_stress=compute_stress,
     lr_cutoff=r_max_lr,

@@ -80,7 +80,7 @@ class EuclideanTransformer(torch.nn.Module):
 
         self.residual_mlp_1 = residual_mlp_1
         if residual_mlp_1:
-            self.residual_mlp_1 = torch.nn.Sequential(
+            self.mlp_1 = torch.nn.Sequential(
                 activation_fn(),
                 torch.nn.Linear(
                     in_features=features_dim,
@@ -92,11 +92,10 @@ class EuclideanTransformer(torch.nn.Module):
                     out_features=features_dim,
                 ),
             )
-            self.run_residual_mlp_1 = lambda x: self.residual_mlp_1(x) + x
 
         self.residual_mlp_2 = residual_mlp_2
         if residual_mlp_2:
-            self.residual_mlp_2 = torch.nn.Sequential(
+            self.mlp_2 = torch.nn.Sequential(
                 activation_fn(),
                 torch.nn.Linear(
                     in_features=features_dim,
@@ -108,7 +107,6 @@ class EuclideanTransformer(torch.nn.Module):
                     out_features=features_dim,
                 ),
             )
-            self.run_residual_mlp_2 = lambda x: self.residual_mlp_2(x) + x
 
     def forward(
         self,
@@ -138,7 +136,9 @@ class EuclideanTransformer(torch.nn.Module):
             att_inv_features = self.layer_norm_inv_1(att_inv_features)
 
         if self.residual_mlp_1:
-            att_inv_features = self.run_residual_mlp_1(att_inv_features)
+            att_inv_features_temp = att_inv_features.clone()
+            att_inv_features = att_inv_features + self.mlp_1(att_inv_features_temp)
+
         d_inv_features, d_ev_features = self.interaction_block(
             att_inv_features, att_ev_features
         )
@@ -147,7 +147,8 @@ class EuclideanTransformer(torch.nn.Module):
         new_ev_features = att_ev_features + d_ev_features
 
         if self.residual_mlp_2:
-            new_inv_features = self.run_residual_mlp_2(new_inv_features)
+            new_inv_features_temp = new_inv_features.clone()
+            new_inv_features = new_inv_features + self.mlp_2(new_inv_features_temp)
 
         if self.layer_normalization_2:
             new_inv_features = self.layer_norm_inv_2(new_inv_features)
