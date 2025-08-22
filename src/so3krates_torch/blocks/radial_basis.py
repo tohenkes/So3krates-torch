@@ -1,12 +1,9 @@
 import torch
-from e3nn.util.jit import compile_mode
-from typing import Any, Callable, Dict, List, Optional, Type, Union
 from torch.nn import Parameter
 from torch.nn import Module
 import math
 
 
-@compile_mode("script")
 class GaussianBasis(Module):
     def __init__(
         self,
@@ -26,8 +23,8 @@ class GaussianBasis(Module):
             self.centers = Parameter(centers)
             self.widths = Parameter(widths)
         else:
-            self.register_buffer("centers", centers)#, persistent=False)
-            self.register_buffer("widths", widths)#, persistent=False)
+            self.register_buffer("centers", centers)  # , persistent=False)
+            self.register_buffer("widths", widths)  # , persistent=False)
 
     def _init_centers(self, min: float, max: float, n: int) -> torch.Tensor:
         return torch.linspace(min, max, n)
@@ -43,7 +40,6 @@ class GaussianBasis(Module):
         ).squeeze()
 
 
-@compile_mode("script")
 class BernsteinBasis(Module):
     def __init__(
         self,
@@ -72,24 +68,19 @@ class BernsteinBasis(Module):
 
     def forward(self, distances: torch.Tensor) -> torch.Tensor:
         exp_r = torch.exp(-self.gamma * distances)
-        exp_r = torch.clamp(
-            exp_r, min=self.eps, max=1.0 - self.eps
-        )
+        exp_r = torch.clamp(exp_r, min=self.eps, max=1.0 - self.eps)
         x = exp_r
-        k_log_x = self.k * torch.log(x) 
+        k_log_x = self.k * torch.log(x)
         k_rev_log_1_minus_x = self.k_rev * torch.log(1 - x)
 
-        log_poly = (
-            self.b + k_log_x + k_rev_log_1_minus_x
-        )
-        return torch.exp(log_poly) 
+        log_poly = self.b + k_log_x + k_rev_log_1_minus_x
+        return torch.exp(log_poly)
 
 
 def log_binomial_coefficient(n: int, k: int) -> float:
     return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
 
 
-@compile_mode("script")
 class BesselBasis(Module):
     def __init__(
         self,
@@ -123,7 +114,6 @@ class BesselBasis(Module):
         return output
 
 
-@compile_mode("script")
 class ComputeRBF(Module):
     def __init__(
         self,

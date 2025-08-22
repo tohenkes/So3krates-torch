@@ -1,0 +1,88 @@
+{
+  "data": {
+    "avg_num_neighbors": null,
+    "energy_unit": "eV",
+    "dipole_vec_unit": "Debye",
+    "filepath": "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/example/training/qm7x_1percent.extxyz",
+    "length_unit": "Angstrom",
+    "neighbors_lr_bool": true, 
+    "neighbors_lr_cutoff": 4.5,
+    "shift_mode": "mean",
+    "split_seed": 7
+  },
+  "model": {
+    "activation_fn": "silu",
+    "cutoff": 4.5,
+    "cutoff_fn": "phys",
+    "cutoff_lr": null,
+    "degrees": [1, 2, 3, 4],
+    "dispersion_energy_bool": false,
+    "dispersion_energy_cutoff_lr_damping": null,
+    "dispersion_energy_scale": 1.2,
+    "electrostatic_energy_bool": false,
+    "electrostatic_energy_scale": 4.0,
+    "energy_activation_fn": "silu",
+    "energy_learn_atomic_type_scales": true,
+    "energy_learn_atomic_type_shifts": true,
+    "energy_regression_dim": 128,
+    "input_convention": "positions",
+    "layer_normalization_1": true,
+    "layer_normalization_2": true,
+    "layers_behave_like_identity_fn_at_init": false,
+    "message_normalization": "avg_num_neighbors",
+    "num_features": 128,
+    "num_features_head": 32,
+    "num_heads": 4,
+    "num_layers": 3,
+    "num_radial_basis_fn": 32,
+    "output_is_zero_at_init": false,
+    "qk_non_linearity": "identity",
+    "radial_basis_fn": "gaussian",
+    "residual_mlp_1": true,
+    "residual_mlp_2": false,
+    "use_charge_embed": true,
+    "use_spin_embed": true,
+    "zbl_repulsion_bool": false
+  },
+  "neighborlist_format_lr": "sparse",
+  "optimizer": {
+    "gradient_clipping": "clip_by_global_norm",
+    "gradient_clipping_args": {
+      "max_norm": 10
+    },
+    "learning_rate": 0.001,
+    "learning_rate_schedule": "exponential_decay",
+    "learning_rate_schedule_args": {
+      "decay_rate": 0.85,
+      "transition_steps": 500000
+    },
+    "name": "amsgrad",
+    "num_of_nans_to_ignore": 0,
+    "optimizer_args": null
+  },
+  "training": {
+    "allow_restart": true,
+    "batch_max_num_edges": 40960,
+    "batch_max_num_graphs": 101,
+    "batch_max_num_nodes": 40960,
+    "batch_max_num_pairs": 40960,
+    "eval_every_num_steps": 50,
+    "log_gradient_values": false,
+    "loss_weights": {
+      "energy": 1.0,
+      "forces": 10.0
+    },
+    "model_seed": 7,
+    "num_epochs": 5,
+    "num_train": 1145,
+    "num_valid": 127,
+    "training_seed": 7,
+    "use_wandb": true,
+    "wandb_init_args": {
+      "group": null,
+      "name": "test_run1",
+      "project": "test_torchkrates"
+    }
+  },
+  "workdir": "test_run1"
+}

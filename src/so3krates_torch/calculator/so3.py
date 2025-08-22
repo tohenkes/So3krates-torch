@@ -1,4 +1,3 @@
-
 ###########################################################################################
 
 # Based on the MACE package: https://github.com/ACEsuit/mace
@@ -25,6 +24,7 @@ def get_model_dtype(model: torch.nn.Module) -> torch.dtype:
     if mode_dtype == torch.float32:
         return "float32"
     raise ValueError(f"Unknown dtype {mode_dtype}")
+
 
 class TorchkratesCalculator(Calculator):
     """Calculator for Torchkrates models"""
@@ -75,39 +75,42 @@ class TorchkratesCalculator(Calculator):
                 "partial_charges",
                 "hirshfeld_ratios",
                 "dipole_vec",
-                "descriptors"
+                "descriptors",
             ]
         else:
             self.implemented_properties = [
                 "energy",
                 "forces",
                 "stress",
-                "descriptors"
+                "descriptors",
             ]
-        
+
         if model_paths is not None:
             if isinstance(model_paths, str):
                 # Find all models that satisfy the wildcard (e.g. model_*.pt)
                 model_paths_glob = glob(model_paths)
 
                 if len(model_paths_glob) == 0:
-                    raise ValueError(f"Couldn't find model files: {model_paths}")
+                    raise ValueError(
+                        f"Couldn't find model files: {model_paths}"
+                    )
                 model_paths = model_paths_glob
 
             elif isinstance(model_paths, Path):
                 model_paths = [model_paths]
-            
+
             if len(model_paths) == 0:
                 raise ValueError(f"No model files found in {model_paths}")
-            
+
             self.num_models = len(model_paths)
 
             self.models = [
                 torch.load(
-                    f=model_path, map_location=device, weights_only=False)
-                    for model_path in model_paths
-                ]
-            
+                    f=model_path, map_location=device, weights_only=False
+                )
+                for model_path in model_paths
+            ]
+
         elif models is not None:
             if not isinstance(models, list):
                 models = [models]
@@ -127,23 +130,24 @@ class TorchkratesCalculator(Calculator):
                 )
             elif model_type == "SO3LR":
                 self.implemented_properties.extend(
-                    ["dipole_var",
-                     "hirshfeld_var",
-                     "partial_charges_var"
-                     ]
+                    ["dipole_var", "hirshfeld_var", "partial_charges_var"]
                 )
-        
+
         if model_type == "SO3LR":
             for model in self.models:
-                model.dispersion_energy_cutoff_lr_damping = dispersion_energy_cutoff_lr_damping
+                model.dispersion_energy_cutoff_lr_damping = (
+                    dispersion_energy_cutoff_lr_damping
+                )
 
         for model in self.models:
             model.to(device)
-        
+
         r_maxs = [model.r_max.cpu() for model in self.models]
         r_maxs = np.array(r_maxs)
         if not np.all(r_maxs == r_maxs[0]):
-            raise ValueError(f"committee r_max are not all the same {' '.join(r_maxs)}")
+            raise ValueError(
+                f"committee r_max are not all the same {' '.join(r_maxs)}"
+            )
         self.r_max = float(r_maxs[0])
         self.r_max_lr = r_max_lr
         for model in self.models:
@@ -152,9 +156,7 @@ class TorchkratesCalculator(Calculator):
         self.device = torch_tools.init_device(device)
         self.energy_units_to_eV = energy_units_to_eV
         self.length_units_to_A = length_units_to_A
-        self.z_table = utils.AtomicNumberTable(
-            [int(z) for z in range(1, 119)]
-        )
+        self.z_table = utils.AtomicNumberTable([int(z) for z in range(1, 119)])
         self.charges_key = charges_key
 
         model_dtype = get_model_dtype(self.models[0])
@@ -183,7 +185,9 @@ class TorchkratesCalculator(Calculator):
         dict_of_tensors = {}
         if model_type in ["SO3LR", "So3krates"]:
             energies = torch.zeros(num_models, device=self.device)
-            node_energy = torch.zeros(num_models, num_atoms, device=self.device)
+            node_energy = torch.zeros(
+                num_models, num_atoms, device=self.device
+            )
             forces = torch.zeros(num_models, num_atoms, 3, device=self.device)
             stress = torch.zeros(num_models, 3, 3, device=self.device)
             dict_of_tensors.update(
@@ -206,19 +210,17 @@ class TorchkratesCalculator(Calculator):
                 {
                     "dipole": dipole,
                     "partial_charges": partial_charges,
-                    "hirshfeld_ratios": hirshfeld_ratios
+                    "hirshfeld_ratios": hirshfeld_ratios,
                 }
             )
         return dict_of_tensors
-    
+
     def _atoms_to_batch(self, atoms):
         self.arrays_keys.update({self.charges_key: "Qs"})
         keyspec = data.KeySpecification(
             info_keys=self.info_keys, arrays_keys=self.arrays_keys
         )
-        config = data.config_from_atoms(
-            atoms, key_specification=keyspec
-        )
+        config = data.config_from_atoms(atoms, key_specification=keyspec)
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
                 So3Data.from_config(
@@ -240,7 +242,9 @@ class TorchkratesCalculator(Calculator):
         return batch_clone
 
     # pylint: disable=dangerous-default-value
-    def calculate(self, atoms=None, properties=None, system_changes=all_changes):
+    def calculate(
+        self, atoms=None, properties=None, system_changes=all_changes
+    ):
         """
         Calculate properties.
         :param atoms: ase.Atoms object
@@ -271,50 +275,55 @@ class TorchkratesCalculator(Calculator):
 
             if self.model_type in ["SO3LR"]:
                 ret_tensors["dipole"][i] = out["dipole_vec"].detach()
-                ret_tensors["partial_charges"][i] = out["partial_charges"].detach()
-                ret_tensors["hirshfeld_ratios"][i] = out["hirshfeld_ratios"].detach()
+                ret_tensors["partial_charges"][i] = out[
+                    "partial_charges"
+                ].detach()
+                ret_tensors["hirshfeld_ratios"][i] = out[
+                    "hirshfeld_ratios"
+                ].detach()
 
         self.results = {}
         if self.model_type in ["SO3LR", "So3krates"]:
-                    self.results["energy"] = (
-                        torch.mean(ret_tensors["energies"], dim=0).cpu().item()
+            self.results["energy"] = (
+                torch.mean(ret_tensors["energies"], dim=0).cpu().item()
+                * self.energy_units_to_eV
+            )
+            self.results["free_energy"] = self.results["energy"]
+            self.results["forces"] = (
+                torch.mean(ret_tensors["forces"], dim=0).cpu().numpy()
+                * self.energy_units_to_eV
+                / self.length_units_to_A
+            )
+            if self.num_models > 1:
+                self.results["energies"] = (
+                    ret_tensors["energies"].cpu().numpy()
+                    * self.energy_units_to_eV
+                )
+                self.results["energy_var"] = (
+                    torch.var(ret_tensors["energies"], dim=0, unbiased=False)
+                    .cpu()
+                    .item()
+                    * self.energy_units_to_eV
+                )
+                self.results["forces_comm"] = (
+                    ret_tensors["forces"].cpu().numpy()
+                    * self.energy_units_to_eV
+                    / self.length_units_to_A
+                )
+            if out["stress"] is not None:
+                self.results["stress"] = full_3x3_to_voigt_6_stress(
+                    torch.mean(ret_tensors["stress"], dim=0).cpu().numpy()
+                    * self.energy_units_to_eV
+                    / self.length_units_to_A**3
+                )
+                if self.num_models > 1:
+                    self.results["stress_var"] = full_3x3_to_voigt_6_stress(
+                        torch.var(ret_tensors["stress"], dim=0, unbiased=False)
+                        .cpu()
+                        .numpy()
                         * self.energy_units_to_eV
+                        / self.length_units_to_A**3
                     )
-                    self.results["free_energy"] = self.results["energy"]
-                    self.results["forces"] = (
-                        torch.mean(ret_tensors["forces"], dim=0).cpu().numpy()
-                        * self.energy_units_to_eV
-                        / self.length_units_to_A
-                    )
-                    if self.num_models > 1:
-                        self.results["energies"] = (
-                            ret_tensors["energies"].cpu().numpy() * self.energy_units_to_eV
-                        )
-                        self.results["energy_var"] = (
-                            torch.var(ret_tensors["energies"], dim=0, unbiased=False)
-                            .cpu()
-                            .item()
-                            * self.energy_units_to_eV
-                        )
-                        self.results["forces_comm"] = (
-                            ret_tensors["forces"].cpu().numpy()
-                            * self.energy_units_to_eV
-                            / self.length_units_to_A
-                        )
-                    if out["stress"] is not None:
-                        self.results["stress"] = full_3x3_to_voigt_6_stress(
-                            torch.mean(ret_tensors["stress"], dim=0).cpu().numpy()
-                            * self.energy_units_to_eV
-                            / self.length_units_to_A**3
-                        )
-                        if self.num_models > 1:
-                            self.results["stress_var"] = full_3x3_to_voigt_6_stress(
-                                torch.var(ret_tensors["stress"], dim=0, unbiased=False)
-                                .cpu()
-                                .numpy()
-                                * self.energy_units_to_eV
-                                / self.length_units_to_A**3
-                            )
 
         if self.model_type in ["SO3LR"]:
             self.results["dipole"] = (
@@ -324,7 +333,9 @@ class TorchkratesCalculator(Calculator):
                 torch.mean(ret_tensors["partial_charges"], dim=0).cpu().numpy()
             )
             self.results["hirshfeld_ratios"] = (
-                torch.mean(ret_tensors["hirshfeld_ratios"], dim=0).cpu().numpy()
+                torch.mean(ret_tensors["hirshfeld_ratios"], dim=0)
+                .cpu()
+                .numpy()
             )
 
             if self.num_models > 1:
@@ -334,12 +345,16 @@ class TorchkratesCalculator(Calculator):
                     .numpy()
                 )
                 self.results["partial_charges_var"] = (
-                    torch.var(ret_tensors["partial_charges"], dim=0, unbiased=False)
+                    torch.var(
+                        ret_tensors["partial_charges"], dim=0, unbiased=False
+                    )
                     .cpu()
                     .numpy()
                 )
                 self.results["hirshfeld_ratios_var"] = (
-                    torch.var(ret_tensors["hirshfeld_ratios"], dim=0, unbiased=False)
+                    torch.var(
+                        ret_tensors["hirshfeld_ratios"], dim=0, unbiased=False
+                    )
                     .cpu()
                     .numpy()
                 )
@@ -365,11 +380,7 @@ class TorchkratesCalculator(Calculator):
             return hessians[0]
         return hessians
 
-    def get_descriptors(
-            self,
-            atoms=None,
-            invariants_only=True
-        ):
+    def get_descriptors(self, atoms=None, invariants_only=True):
         if atoms is None and self.atoms is None:
             raise ValueError("atoms not set")
         if atoms is None:
@@ -389,17 +400,14 @@ class TorchkratesCalculator(Calculator):
         else:
             return {
                 "invariant_features": invariants,
-                "equivariant_features": equivariants
+                "equivariant_features": equivariants,
             }
-
 
 
 import importlib.resources as resources
 
 
-
 class SO3LRCalculator(TorchkratesCalculator):
-
     """Calculator for SO3LR models"""
 
     def __init__(
@@ -416,7 +424,7 @@ class SO3LRCalculator(TorchkratesCalculator):
         charges_key="Qs",
         info_keys=None,
         arrays_keys=None,
-        **kwargs
+        **kwargs,
     ):
 
         models = [self._load_model(device)]
@@ -435,10 +443,14 @@ class SO3LRCalculator(TorchkratesCalculator):
             info_keys=info_keys,
             arrays_keys=arrays_keys,
             model_type="SO3LR",
-            **kwargs
+            **kwargs,
         )
 
-    def _load_model(self, device:str = "cpu") -> torch.nn.Module:
-        with resources.path("so3krates_torch.pretrained.so3lr", "so3lr.model") as model_path:
-            model = torch.load(model_path, map_location=device, weights_only=False)
+    def _load_model(self, device: str = "cpu") -> torch.nn.Module:
+        with resources.path(
+            "so3krates_torch.pretrained.so3lr", "so3lr.model"
+        ) as model_path:
+            model = torch.load(
+                model_path, map_location=device, weights_only=False
+            )
         return model

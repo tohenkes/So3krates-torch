@@ -1,12 +1,10 @@
 import torch
-from e3nn.util.jit import compile_mode
 from typing import Any, Callable, Dict, List, Optional, Type, Union, Tuple
 from so3krates_torch.blocks.so3_conv_invariants import L0Contraction
 import math
 from so3krates_torch.tools import scatter
 
 
-@compile_mode("script")
 class EuclideanTransformer(torch.nn.Module):
     def __init__(
         self,
@@ -25,7 +23,9 @@ class EuclideanTransformer(torch.nn.Module):
         layer_normalization_2: bool = False,
         residual_mlp_1: bool = False,
         residual_mlp_2: bool = False,
-        qk_non_linearity: Optional[Callable[[torch.Tensor], torch.Tensor]] = None
+        qk_non_linearity: Optional[
+            Callable[[torch.Tensor], torch.Tensor]
+        ] = None,
     ):
         super().__init__()
 
@@ -54,7 +54,7 @@ class EuclideanTransformer(torch.nn.Module):
             device=device,
             message_normalization=message_normalization,
             avg_num_neighbors=avg_num_neighbors,
-            qk_non_linearity=qk_non_linearity
+            qk_non_linearity=qk_non_linearity,
         )
         self.interaction_block = InteractionBlock(
             degrees=degrees,
@@ -137,7 +137,9 @@ class EuclideanTransformer(torch.nn.Module):
 
         if self.residual_mlp_1:
             att_inv_features_temp = att_inv_features.clone()
-            att_inv_features = att_inv_features + self.mlp_1(att_inv_features_temp)
+            att_inv_features = att_inv_features + self.mlp_1(
+                att_inv_features_temp
+            )
 
         d_inv_features, d_ev_features = self.interaction_block(
             att_inv_features, att_ev_features
@@ -148,7 +150,9 @@ class EuclideanTransformer(torch.nn.Module):
 
         if self.residual_mlp_2:
             new_inv_features_temp = new_inv_features.clone()
-            new_inv_features = new_inv_features + self.mlp_2(new_inv_features_temp)
+            new_inv_features = new_inv_features + self.mlp_2(
+                new_inv_features_temp
+            )
 
         if self.layer_normalization_2:
             new_inv_features = self.layer_norm_inv_2(new_inv_features)
@@ -156,7 +160,6 @@ class EuclideanTransformer(torch.nn.Module):
         return new_inv_features, new_ev_features
 
 
-@compile_mode("script")
 class EuclideanAttentionBlock(torch.nn.Module):
     """
     Fig. 3c) in https://doi.org/10.1038/s41467-024-50620-6
@@ -170,7 +173,9 @@ class EuclideanAttentionBlock(torch.nn.Module):
         filter_net_inv: callable,
         filter_net_ev: callable,
         message_normalization: str = "sqrt_num_features",
-        qk_non_linearity: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        qk_non_linearity: Optional[
+            Callable[[torch.Tensor], torch.Tensor]
+        ] = None,
         avg_num_neighbors: Optional[int] = None,
         device: str = "cpu",
     ):
@@ -236,7 +241,6 @@ class EuclideanAttentionBlock(torch.nn.Module):
         # non-linearity for query and key weights
         self.qk_non_linearity = qk_non_linearity()
 
-
         self.degree_repeats = torch.tensor(
             [2 * y + 1 for y in degrees],
         ).to(device)
@@ -281,37 +285,6 @@ class EuclideanAttentionBlock(torch.nn.Module):
         )
         # computing the queries, keys, and values and immediately
         # selecting receivers (i) and senders (j) (Eq. 21 https://doi.org/10.1038/s41467-024-50620-6)
-        # q_inv = self.qk_non_linearity(torch.einsum(
-        #    "Hij, NHi -> NHj",
-        #    self.W_q_inv,
-        #    inv_features_inv,
-        # ))[receivers]
-
-        # k_inv = self.qk_non_linearity(torch.einsum(
-        #    "Hij, NHi -> NHj",
-        #    self.W_k_inv,
-        #    inv_features_inv,
-        # ))[senders]
-
-        # v_inv = torch.einsum(
-        #    "Hij, NHi -> NHj",
-        #    self.W_v_inv,
-        #    inv_features_inv,
-        # )[senders]
-
-        # q_ev = self.qk_non_linearity(torch.einsum(
-        #    "Hij, NHi -> NHj",
-        #    self.W_q_ev,
-        #    inv_features_ev,
-        # ))[receivers]
-
-        # k_ev = self.qk_non_linearity(torch.einsum(
-        #    "Hij, NHi -> NHj",
-        #    self.W_k_ev,
-        #    inv_features_ev,
-        # ))[senders]
-
-        # computing q_inv using matmul:
         q_inv = self.qk_non_linearity(
             torch.matmul(
                 inv_features_inv.transpose(0, 1), self.W_q_inv
@@ -340,6 +313,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
         filtered_k_inv = k_inv * filter_w_inv
         filtered_k_ev = k_ev * filter_w_ev
 
+        # attention coefficients
         alpha_inv = (q_inv * filtered_k_inv).sum(
             -1, keepdim=True
         ) / self.att_norm_inv
@@ -375,7 +349,6 @@ class EuclideanAttentionBlock(torch.nn.Module):
         return d_att_inv_features, d_att_ev_features
 
 
-@compile_mode("script")
 class InteractionBlock(torch.nn.Module):
     """
     Fig. 3d) in https://doi.org/10.1038/s41467-024-50620-6
@@ -432,7 +405,6 @@ class InteractionBlock(torch.nn.Module):
         return d_inv_features, d_ev_features
 
 
-@compile_mode("script")
 class FilterNet(torch.nn.Module):
     """
     Fig. 3e) in https://doi.org/10.1038/s41467-024-50620-6

@@ -1,7 +1,5 @@
 import torch
-from e3nn.util.jit import compile_mode
 from typing import Callable, List, Dict, Optional
-import torch
 import torch.nn as nn
 import itertools as it
 import numpy as np
@@ -9,7 +7,6 @@ import pkg_resources
 from so3krates_torch.tools.scatter import scatter_sum
 
 
-@compile_mode("script")
 class SO3ConvolutionInvariants(torch.nn.Module):
     def __init__(
         self,

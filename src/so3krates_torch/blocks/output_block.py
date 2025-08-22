@@ -1,11 +1,9 @@
 import torch
 import torch.nn as nn
 from so3krates_torch.tools import scatter
-from e3nn.util.jit import compile_mode
 from typing import Callable, Dict, Optional
 
 
-@compile_mode("script")
 class AtomicEnergyOutputHead(nn.Module):
     def __init__(
         self,
@@ -43,9 +41,9 @@ class AtomicEnergyOutputHead(nn.Module):
         self.non_linearity = non_linearity()
         self.final_non_linearity = final_non_linearity
         if learn_atomic_type_shifts:
-            assert atomic_type_shifts is None, (
-                "If learn_atomic_type_shifts is True, atomic_type_shifts must be None."
-            )
+            assert (
+                atomic_type_shifts is None
+            ), "If learn_atomic_type_shifts is True, atomic_type_shifts must be None."
         if learn_atomic_type_shifts or learn_atomic_type_scales:
             assert num_elements is not None, (
                 "If learn_atomic_type_shifts or learn_atomic_type_scales is True, "
@@ -65,7 +63,7 @@ class AtomicEnergyOutputHead(nn.Module):
                 num_elements, 1, bias=False, dtype=torch.get_default_dtype()
             )
             nn.init.ones_(self.energy_scales.weight)
-        
+
         self.use_defined_shifts = False
         if atomic_type_shifts is not None:
             self.use_defined_shifts = True
@@ -84,7 +82,7 @@ class AtomicEnergyOutputHead(nn.Module):
                 torch.tensor(
                     list(atomic_type_shifts.values()),
                     dtype=torch.get_default_dtype(),
-                    requires_grad=False
+                    requires_grad=False,
                 )
             )
 
@@ -108,18 +106,17 @@ class AtomicEnergyOutputHead(nn.Module):
             atomic_energies += self.energy_shifts(data["node_attrs"])
         if self.learn_atomic_type_scales:
             atomic_energies *= self.energy_scales(data["node_attrs"])
-        
+
         if self.use_defined_shifts:
-            assert atomic_numbers is not None, (
-                "If use_defined_shifts is True, atomic_numbers must be provided."
-            )
+            assert (
+                atomic_numbers is not None
+            ), "If use_defined_shifts is True, atomic_numbers must be provided."
             atomic_indices = atomic_numbers - 1
             atomic_energies += self.energy_shifts[atomic_indices].unsqueeze(1)
 
         return atomic_energies
 
 
-@compile_mode("script")
 class PartialChargesOutputHead(nn.Module):
     def __init__(
         self,
@@ -182,7 +179,6 @@ class PartialChargesOutputHead(nn.Module):
         return partial_charges
 
 
-@compile_mode("script")
 class DipoleVecOutputHead(nn.Module):
     def __init__(self):
         super().__init__()
@@ -205,7 +201,6 @@ class DipoleVecOutputHead(nn.Module):
         return total_dipole
 
 
-@compile_mode("script")
 class HirshfeldOutputHead(nn.Module):
     def __init__(
         self,
@@ -222,7 +217,7 @@ class HirshfeldOutputHead(nn.Module):
         self.v_shift_embedding = nn.Embedding(
             num_embeddings=100, embedding_dim=1
         )
-        
+
         self.q_embedding = nn.Embedding(
             num_embeddings=100, embedding_dim=num_features // 2
         )
@@ -235,7 +230,9 @@ class HirshfeldOutputHead(nn.Module):
                 nn.Linear(regression_dim // 2, num_features // 2),
             )
         else:
-            self.transform_features = nn.Linear(num_features, num_features // 2)
+            self.transform_features = nn.Linear(
+                num_features, num_features // 2
+            )
 
     def forward(
         self,
@@ -253,17 +250,23 @@ class HirshfeldOutputHead(nn.Module):
         Returns:
             hirshfeld_ratios: Predicted Hirshfeld ratios, shape: (num_nodes)
         """
-        
-        v_shift = self.v_shift_embedding(atomic_numbers).squeeze(-1)  # (num_nodes)
-        
+
+        v_shift = self.v_shift_embedding(atomic_numbers).squeeze(
+            -1
+        )  # (num_nodes)
+
         q = self.q_embedding(atomic_numbers)  # (num_nodes, num_features//2)
-        
-        k = self.transform_features(inv_features)  # (num_nodes, num_features//2)
-        
-        qk = (q * k / torch.sqrt(torch.tensor(k.shape[-1], dtype=k.dtype))).sum(dim=-1)
-        
+
+        k = self.transform_features(
+            inv_features
+        )  # (num_nodes, num_features//2)
+
+        qk = (
+            q * k / torch.sqrt(torch.tensor(k.shape[-1], dtype=k.dtype))
+        ).sum(dim=-1)
+
         v_eff = v_shift + qk  # (num_nodes)
-        
+
         hirshfeld_ratios = torch.abs(v_eff)
-        
+
         return hirshfeld_ratios

@@ -13,44 +13,221 @@ HARTREE = 27.211386245988  # Hartree in eV
 FINE_STRUCTURE = 0.0072973525693  # fine structure constant
 
 # Reference data for dispersion calculations (from mlff dispersion_ref_data)
-ALPHAS = torch.tensor([
-    4.5, 1.38, 164.2, 38., 21., 12., 7.4, 5.4, 3.8,
-    2.67, 162.7, 71., 60., 37., 25., 19.6, 15., 11.1,
-    292.9, 160., 120., 98., 84., 78., 63., 56., 50.,
-    48., 42., 40., 60., 41., 29., 25., 20., 16.8,
-    319.2, 199., 126.74, 119.97, 101.6, 88.42, 80.08, 65.89, 56.1,
-    23.68, 50.6, 39.7, 70.22, 55.95, 43.67, 37.65, 35., 27.3,
-    399.9, 275., 213.7, 204.7, 215.8, 208.4, 200.2, 192.1, 184.2,
-    158.3, 169.5, 164.64, 156.3, 150.2, 144.3, 138.9, 137.2, 99.52,
-    82.53, 71.04, 63.04, 55.06, 42.51, 39.68, 36.5, 33.9, 69.92,
-    61.8, 49.02, 45.01, 38.93, 33.54, 317.8, 246.2, 203.3, 217.,
-    154.4, 127.8, 150.5, 132.2, 131.2, 143.6, 125.3, 121.5, 117.5,
-    113.4, 109.4, 105.4
-], dtype=torch.float32)
+ALPHAS = torch.tensor(
+    [
+        4.5,
+        1.38,
+        164.2,
+        38.0,
+        21.0,
+        12.0,
+        7.4,
+        5.4,
+        3.8,
+        2.67,
+        162.7,
+        71.0,
+        60.0,
+        37.0,
+        25.0,
+        19.6,
+        15.0,
+        11.1,
+        292.9,
+        160.0,
+        120.0,
+        98.0,
+        84.0,
+        78.0,
+        63.0,
+        56.0,
+        50.0,
+        48.0,
+        42.0,
+        40.0,
+        60.0,
+        41.0,
+        29.0,
+        25.0,
+        20.0,
+        16.8,
+        319.2,
+        199.0,
+        126.74,
+        119.97,
+        101.6,
+        88.42,
+        80.08,
+        65.89,
+        56.1,
+        23.68,
+        50.6,
+        39.7,
+        70.22,
+        55.95,
+        43.67,
+        37.65,
+        35.0,
+        27.3,
+        399.9,
+        275.0,
+        213.7,
+        204.7,
+        215.8,
+        208.4,
+        200.2,
+        192.1,
+        184.2,
+        158.3,
+        169.5,
+        164.64,
+        156.3,
+        150.2,
+        144.3,
+        138.9,
+        137.2,
+        99.52,
+        82.53,
+        71.04,
+        63.04,
+        55.06,
+        42.51,
+        39.68,
+        36.5,
+        33.9,
+        69.92,
+        61.8,
+        49.02,
+        45.01,
+        38.93,
+        33.54,
+        317.8,
+        246.2,
+        203.3,
+        217.0,
+        154.4,
+        127.8,
+        150.5,
+        132.2,
+        131.2,
+        143.6,
+        125.3,
+        121.5,
+        117.5,
+        113.4,
+        109.4,
+        105.4,
+    ],
+    dtype=torch.float32,
+)
 
-C6_COEF = torch.tensor([
-    6.50000e+00, 1.46000e+00, 1.38700e+03, 2.14000e+02, 9.95000e+01,
-    4.66000e+01, 2.42000e+01, 1.56000e+01, 9.52000e+00, 6.38000e+00,
-    1.55600e+03, 6.27000e+02, 5.28000e+02, 3.05000e+02, 1.85000e+02,
-    1.34000e+02, 9.46000e+01, 6.43000e+01, 3.89700e+03, 2.22100e+03,
-    1.38300e+03, 1.04400e+03, 8.32000e+02, 6.02000e+02, 5.52000e+02,
-    4.82000e+02, 4.08000e+02, 3.73000e+02, 2.53000e+02, 2.84000e+02,
-    4.98000e+02, 3.54000e+02, 2.46000e+02, 2.10000e+02, 1.62000e+02,
-    1.29600e+02, 4.69100e+03, 3.17000e+03, 1.96858e+03, 1.67791e+03,
-    1.26361e+03, 1.02873e+03, 1.39087e+03, 6.09750e+02, 4.69000e+02,
-    1.57500e+02, 3.39000e+02, 4.52000e+02, 7.07050e+02, 5.87420e+02,
-    4.59320e+02, 3.96000e+02, 3.85000e+02, 2.85900e+02, 6.84600e+03,
-    5.72700e+03, 3.88450e+03, 3.70833e+03, 3.91184e+03, 3.90875e+03,
-    3.84768e+03, 3.70869e+03, 3.51171e+03, 2.78153e+03, 3.12441e+03,
-    2.98429e+03, 2.83995e+03, 2.72412e+03, 2.57678e+03, 2.38753e+03,
-    2.37180e+03, 1.27480e+03, 1.01992e+03, 8.47930e+02, 7.10200e+02,
-    5.96670e+02, 3.59100e+02, 3.47100e+02, 2.98000e+02, 3.92000e+02,
-    7.17440e+02, 6.97000e+02, 5.71000e+02, 5.30920e+02, 4.57530e+02,
-    3.90630e+02, 4.22444e+03, 4.85132e+03, 3.60441e+03, 4.04754e+03,
-    2.87677e+03, 2.37589e+03, 3.10212e+03, 2.82047e+03, 2.79400e+03,
-    3.15095e+03, 2.75600e+03, 2.70257e+03, 2.62659e+03, 2.54862e+03,
-    2.46869e+03, 2.38680e+03
-], dtype=torch.float32)
+C6_COEF = torch.tensor(
+    [
+        6.50000e00,
+        1.46000e00,
+        1.38700e03,
+        2.14000e02,
+        9.95000e01,
+        4.66000e01,
+        2.42000e01,
+        1.56000e01,
+        9.52000e00,
+        6.38000e00,
+        1.55600e03,
+        6.27000e02,
+        5.28000e02,
+        3.05000e02,
+        1.85000e02,
+        1.34000e02,
+        9.46000e01,
+        6.43000e01,
+        3.89700e03,
+        2.22100e03,
+        1.38300e03,
+        1.04400e03,
+        8.32000e02,
+        6.02000e02,
+        5.52000e02,
+        4.82000e02,
+        4.08000e02,
+        3.73000e02,
+        2.53000e02,
+        2.84000e02,
+        4.98000e02,
+        3.54000e02,
+        2.46000e02,
+        2.10000e02,
+        1.62000e02,
+        1.29600e02,
+        4.69100e03,
+        3.17000e03,
+        1.96858e03,
+        1.67791e03,
+        1.26361e03,
+        1.02873e03,
+        1.39087e03,
+        6.09750e02,
+        4.69000e02,
+        1.57500e02,
+        3.39000e02,
+        4.52000e02,
+        7.07050e02,
+        5.87420e02,
+        4.59320e02,
+        3.96000e02,
+        3.85000e02,
+        2.85900e02,
+        6.84600e03,
+        5.72700e03,
+        3.88450e03,
+        3.70833e03,
+        3.91184e03,
+        3.90875e03,
+        3.84768e03,
+        3.70869e03,
+        3.51171e03,
+        2.78153e03,
+        3.12441e03,
+        2.98429e03,
+        2.83995e03,
+        2.72412e03,
+        2.57678e03,
+        2.38753e03,
+        2.37180e03,
+        1.27480e03,
+        1.01992e03,
+        8.47930e02,
+        7.10200e02,
+        5.96670e02,
+        3.59100e02,
+        3.47100e02,
+        2.98000e02,
+        3.92000e02,
+        7.17440e02,
+        6.97000e02,
+        5.71000e02,
+        5.30920e02,
+        4.57530e02,
+        3.90630e02,
+        4.22444e03,
+        4.85132e03,
+        3.60441e03,
+        4.04754e03,
+        2.87677e03,
+        2.37589e03,
+        3.10212e03,
+        2.82047e03,
+        2.79400e03,
+        3.15095e03,
+        2.75600e03,
+        2.70257e03,
+        2.62659e03,
+        2.54862e03,
+        2.46869e03,
+        2.38680e03,
+    ],
+    dtype=torch.float32,
+)
 
 
 def softplus_inverse(x):
@@ -89,11 +266,11 @@ def mixing_rules(
     """Apply mixing rules to compute alpha_ij and C6_ij for dispersion"""
     dtype = hirshfeld_ratios.dtype
     device = hirshfeld_ratios.device
-    
+
     # Move reference data to correct device and dtype
     alphas = ALPHAS.to(device=device, dtype=dtype)
     c6_coef = C6_COEF.to(device=device, dtype=dtype)
-    
+
     atomic_number_i = atomic_numbers[idx_i] - 1  # Convert to 0-based indexing
     atomic_number_j = atomic_numbers[idx_j] - 1
     hirshfeld_ratio_i = hirshfeld_ratios[idx_i]
@@ -106,8 +283,12 @@ def mixing_rules(
 
     alpha_ij = (alpha_i + alpha_j) / 2
     C6_ij = (
-        2 * C6_i * C6_j * alpha_j * alpha_i
-        / (alpha_i ** 2 * C6_j + alpha_j ** 2 * C6_i)
+        2
+        * C6_i
+        * C6_j
+        * alpha_j
+        * alpha_i
+        / (alpha_i**2 * C6_j + alpha_j**2 * C6_i)
     )
 
     return alpha_ij, C6_ij
@@ -117,11 +298,9 @@ def gamma_cubic_fit(alpha: torch.Tensor) -> torch.Tensor:
     """Compute gamma parameter using cubic fit"""
     input_dtype = alpha.dtype
 
-    vdW_radius = (
-        torch.tensor(FINE_STRUCTURE, dtype=input_dtype, device=alpha.device)
-        ** (-4.0 / 21)
-        * alpha ** (1.0 / 7)
-    )
+    vdW_radius = torch.tensor(
+        FINE_STRUCTURE, dtype=input_dtype, device=alpha.device
+    ) ** (-4.0 / 21) * alpha ** (1.0 / 7)
 
     # Cubic fit coefficients
     b0 = torch.tensor(-0.00433008, dtype=input_dtype, device=alpha.device)
@@ -135,10 +314,9 @@ def gamma_cubic_fit(alpha: torch.Tensor) -> torch.Tensor:
         + b1 * vdW_radius
         + b0
     )
-    gamma = (
-        torch.tensor(0.5, dtype=input_dtype, device=alpha.device)
-        / torch.square(sigma)
-    )
+    gamma = torch.tensor(
+        0.5, dtype=input_dtype, device=alpha.device
+    ) / torch.square(sigma)
     return gamma
 
 
@@ -148,15 +326,15 @@ def vdw_qdo_disp_damp(
     C6: torch.Tensor,
     alpha_ij: torch.Tensor,
     gamma_scale: float,
-    c: float
+    c: float,
 ) -> torch.Tensor:
     """Compute vdW-QDO dispersion energy with damping"""
     input_dtype = R.dtype
     device = R.device
-    
+
     # Compute higher-order dispersion coefficients
     C8 = 5 / gamma * C6
-    C10 = 245 / 8 / gamma ** 2 * C6
+    C10 = 245 / 8 / gamma**2 * C6
     p = gamma_scale * 2 * 2.54 * alpha_ij ** (1 / 7)
 
     # Compute potential
@@ -167,11 +345,7 @@ def vdw_qdo_disp_damp(
     p8 = torch.pow(p, 8)
     p10 = torch.pow(p, 10)
 
-    V3 = (
-        -C6 / (R6 + p6)
-        - C8 / (R8 + p8)
-        - C10 / (R10 + p10)
-    )
+    V3 = -C6 / (R6 + p6) - C8 / (R8 + p8) - C10 / (R10 + p10)
 
     hartree_factor = torch.tensor(HARTREE, dtype=input_dtype, device=device)
     return c * V3 * hartree_factor
@@ -510,9 +684,8 @@ class DispersionInteraction(nn.Module):
         neighborlist_format: str = "sparse",
     ) -> None:
         super().__init__()
-        
+
         self.c = 0.5 if neighborlist_format == "sparse" else 1.0
-        
 
     def forward(
         self,
@@ -542,14 +715,14 @@ class DispersionInteraction(nn.Module):
         Returns:
             (N,1) atomic dispersion energies.
         """
-        
+
         if cutoff_lr is not None and cutoff_lr_damping is None:
             raise ValueError(
                 f"cutoff_lr is set but cutoff_lr_damping is not. "
                 f"Got cutoff_lr={cutoff_lr} and "
                 f"cutoff_lr_damping={cutoff_lr_damping}"
             )
-        
+
         if lengths_lr.dim() == 2 and lengths_lr.size(-1) == 1:
             lengths_lr = lengths_lr.squeeze(-1)
         if hirshfeld_ratios.dim() == 2 and hirshfeld_ratios.size(-1) == 1:
@@ -577,7 +750,7 @@ class DispersionInteraction(nn.Module):
             C6_ij,
             alpha_ij,
             dispersion_energy_scale,
-            self.c
+            self.c,
         )
 
         # Apply smooth cutoff if specified

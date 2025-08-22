@@ -41,6 +41,7 @@ class AtomicData(torch_geometric.data.Data):
     stress: torch.Tensor
     virials: torch.Tensor
     dipole: torch.Tensor
+    hirshfeld_ratios: torch.Tensor
     charges: torch.Tensor
     total_charge: torch.Tensor
     total_spin: torch.Tensor
@@ -74,6 +75,7 @@ class AtomicData(torch_geometric.data.Data):
         stress: Optional[torch.Tensor],  # [1,3,3]
         virials: Optional[torch.Tensor],  # [1,3,3]
         dipole: Optional[torch.Tensor],  # [, 3]
+        hirshfeld_ratios: Optional[torch.Tensor],  # [n_nodes, ]
         charges: Optional[torch.Tensor],  # [n_nodes, ]
         elec_temp: Optional[torch.Tensor],  # [,]
         edge_index_lr: Optional[torch.Tensor] = None,  # [2, n_edges_lr]
@@ -108,6 +110,9 @@ class AtomicData(torch_geometric.data.Data):
         assert virials is None or virials.shape == (1, 3, 3)
         assert dipole is None or dipole.shape[-1] == 3
         assert charges is None or charges.shape == (num_nodes,)
+        assert hirshfeld_ratios is None or hirshfeld_ratios.shape == (
+            num_nodes,
+        )
         assert elec_temp is None or len(elec_temp.shape) == 0
         assert total_charge is None or len(total_charge.shape) == 0
         assert total_spin is None or len(total_spin.shape) == 0
@@ -142,6 +147,7 @@ class AtomicData(torch_geometric.data.Data):
             "virials": virials,
             "dipole": dipole,
             "charges": charges,
+            "hirshfeld_ratios": hirshfeld_ratios,
             "elec_temp": elec_temp,
             "total_charge": total_charge,
             "total_spin": total_spin,
@@ -334,6 +340,14 @@ class AtomicData(torch_geometric.data.Data):
             if config.properties.get("charges") is not None
             else torch.zeros(num_atoms, dtype=torch.get_default_dtype())
         )
+        hirshfeld_ratios = (
+            torch.tensor(
+                config.properties.get("hirshfeld_ratios"),
+                dtype=torch.get_default_dtype(),
+            )
+            if config.properties.get("hirshfeld_ratios") is not None
+            else torch.zeros(num_atoms, dtype=torch.get_default_dtype())
+        )
         elec_temp = (
             torch.tensor(
                 config.properties.get("elec_temp"),
@@ -388,6 +402,7 @@ class AtomicData(torch_geometric.data.Data):
             stress=stress,
             virials=virials,
             dipole=dipole,
+            hirshfeld_ratios=hirshfeld_ratios,
             charges=charges,
             elec_temp=elec_temp,
             total_charge=total_charge,

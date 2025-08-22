@@ -1,11 +1,9 @@
 import torch
-from e3nn.util.jit import compile_mode
 from typing import Callable, List, Dict, Optional
 from so3krates_torch.tools import scatter
 import math
 
 
-@compile_mode("script")
 class InvariantEmbedding(torch.nn.Module):
     """
     Eq. 10 in https://doi.org/10.1038/s41467-024-50620-6
@@ -29,7 +27,6 @@ class InvariantEmbedding(torch.nn.Module):
         self.embedding.reset_parameters()
 
 
-@compile_mode("script")
 class EuclideanEmbedding(torch.nn.Module):
     """
     Eq. 11 in https://doi.org/10.1038/s41467-024-50620-6
@@ -76,7 +73,6 @@ class EuclideanEmbedding(torch.nn.Module):
         return ev_embedding
 
 
-@compile_mode("script")
 class ChargeSpinEmbedding(torch.nn.Module):
     """
     As introduced in doi.org/10.1038/s41467-021-27504-0.

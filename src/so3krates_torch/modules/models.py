@@ -1,6 +1,5 @@
 import torch
 from typing import Any, Callable, Dict, List, Optional, Type, Union
-from e3nn.util.jit import compile_mode
 from so3krates_torch.data.utils import prepare_graph
 from so3krates_torch.modules.cutoff import cutoff_fn_dict
 from so3krates_torch.modules.spherical_harmonics import RealSphericalHarmonics
@@ -12,7 +11,7 @@ from so3krates_torch.blocks.output_block import (
     AtomicEnergyOutputHead,
     PartialChargesOutputHead,
     DipoleVecOutputHead,
-    HirshfeldOutputHead
+    HirshfeldOutputHead,
 )
 from mace.modules.utils import get_outputs
 from so3krates_torch.blocks import radial_basis
@@ -20,13 +19,12 @@ import math
 from so3krates_torch.blocks.physical_potentials import (
     ZBLRepulsion,
     ElectrostaticInteraction,
-    DispersionInteraction
+    DispersionInteraction,
 )
 from so3krates_torch.tools import scatter
 from so3krates_torch.tools import utils
 
 
-@compile_mode("script")
 class So3krates(torch.nn.Module):
     def __init__(
         self,
@@ -44,7 +42,7 @@ class So3krates(torch.nn.Module):
         initialize_ev_to_zeros: bool = True,
         radial_basis_fn: str = "gaussian",
         trainable_rbf: bool = False,
-        atomic_type_shifts: Optional[dict[str,float]] = None,
+        atomic_type_shifts: Optional[dict[str, float]] = None,
         learn_atomic_type_shifts: bool = False,
         learn_atomic_type_scales: bool = False,
         layer_normalization_1: bool = False,
@@ -55,7 +53,7 @@ class So3krates(torch.nn.Module):
         use_spin_embed: bool = False,
         interaction_bias: bool = True,
         qk_non_linearity: str = "identity",
-        cutoff_fn: str = 'cosine',
+        cutoff_fn: str = "cosine",
         cutoff_p: int = 5,
         activation_fn: str = "silu",
         energy_activation_fn: str = "silu",
@@ -65,19 +63,27 @@ class So3krates(torch.nn.Module):
         layers_behave_like_identity_fn_at_init: bool = False,
         output_is_zero_at_init: bool = False,
         input_convention: str = "positions",
-        num_features_head: Optional[int] = None  # not used; just for compatibility with jax version
+        num_features_head: Optional[
+            int
+        ] = None,  # not used; just for compatibility with jax version
     ):
         super().__init__()
 
         if layers_behave_like_identity_fn_at_init:
-            raise NotImplementedError("Layers behaving like identity functions at initialization is not implemented.")
-        
+            raise NotImplementedError(
+                "Layers behaving like identity functions at initialization is not implemented."
+            )
+
         if output_is_zero_at_init:
-            raise NotImplementedError("Output being zero at initialization is not implemented.")
+            raise NotImplementedError(
+                "Output being zero at initialization is not implemented."
+            )
 
         if input_convention not in ["positions"]:
-            raise ValueError(f"Unknown input convention: {input_convention}"
-                             "Only 'positions' is supported at the moment.")
+            raise ValueError(
+                f"Unknown input convention: {input_convention}"
+                "Only 'positions' is supported at the moment."
+            )
 
         torch.set_default_dtype(dtype)
         self.register_buffer(
@@ -89,7 +95,7 @@ class So3krates(torch.nn.Module):
         )
 
         torch.manual_seed(seed)
-        if cutoff_fn == 'polynomial':
+        if cutoff_fn == "polynomial":
             self.cutoff_fn = cutoff_fn_dict[cutoff_fn](r_max, p=cutoff_p)
         else:
             self.cutoff_fn = cutoff_fn_dict[cutoff_fn](r_max)
@@ -98,10 +104,15 @@ class So3krates(torch.nn.Module):
             degrees=degrees,
         )
 
-        
-        self.activation_fn = utils.activation_fn_dict.get(activation_fn, torch.nn.SiLU)
-        self.energy_activation_fn = utils.activation_fn_dict.get(energy_activation_fn, torch.nn.SiLU)
-        qk_non_linearity = utils.activation_fn_dict.get(qk_non_linearity, torch.nn.Identity)
+        self.activation_fn = utils.activation_fn_dict.get(
+            activation_fn, torch.nn.SiLU
+        )
+        self.energy_activation_fn = utils.activation_fn_dict.get(
+            energy_activation_fn, torch.nn.SiLU
+        )
+        qk_non_linearity = utils.activation_fn_dict.get(
+            qk_non_linearity, torch.nn.Identity
+        )
 
         self.features_dim = features_dim
         self.inv_feature_embedding = embedding.InvariantEmbedding(
@@ -139,7 +150,7 @@ class So3krates(torch.nn.Module):
             radial_basis_fn=radial_basis_fn,
             trainable=trainable_rbf,
         )
-        
+
         self.euclidean_transformers = torch.nn.ModuleList(
             [
                 euclidean_transformer.EuclideanTransformer(
@@ -348,7 +359,6 @@ class So3krates(torch.nn.Module):
         }
 
 
-@compile_mode("script")
 class SO3LR(So3krates):
     def __init__(
         self,
@@ -368,9 +378,9 @@ class SO3LR(So3krates):
             self.r_max_lr = r_max_lr
         else:
             self.r_max_lr = None
-            
+
         self.use_lr = False
-        
+
         # Short-range repulsion
         self.zbl_repulsion_bool = zbl_repulsion_bool
         if zbl_repulsion_bool:
@@ -404,7 +414,9 @@ class SO3LR(So3krates):
                 neighborlist_format=neighborlist_format
             )
             self.dispersion_energy_scale = dispersion_energy_scale
-            self.dispersion_energy_cutoff_lr_damping = dispersion_energy_cutoff_lr_damping
+            self.dispersion_energy_cutoff_lr_damping = (
+                dispersion_energy_cutoff_lr_damping
+            )
 
     def _get_graph(
         self,
@@ -495,10 +507,10 @@ class SO3LR(So3krates):
                 lengths_lr=self.lengths_lr,
                 num_nodes=inv_features.shape[0],
                 cutoff_lr=self.r_max_lr,
-                electrostatic_energy_scale=self.electrostatic_energy_scale
+                electrostatic_energy_scale=self.electrostatic_energy_scale,
             )
             atomic_energies += electrostatic_energies
-        
+
         if self.dispersion_energy_bool:
             hirshfeld_ratios = self.hirshfeld_output_block(
                 inv_features=inv_features,
@@ -513,7 +525,7 @@ class SO3LR(So3krates):
                 num_nodes=inv_features.shape[0],
                 cutoff_lr=self.r_max_lr,
                 cutoff_lr_damping=self.dispersion_energy_cutoff_lr_damping,
-                dispersion_energy_scale=self.dispersion_energy_scale
+                dispersion_energy_scale=self.dispersion_energy_scale,
             )
             atomic_energies += dispersion_energies
         total_energy = scatter.scatter_sum(
@@ -555,7 +567,5 @@ class SO3LR(So3krates):
             "hirshfeld_ratios": (
                 hirshfeld_ratios if self.dispersion_energy_bool else None
             ),
-            "descriptors": (
-                inv_features if return_descriptors else None
-            )
+            "descriptors": (inv_features if return_descriptors else None),
         }

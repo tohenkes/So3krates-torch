@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "torchkrates"
 version = "0.1"
-description = "Implementation of So3krates in mace-torch"
+description = "Implementation of So3krates in pytorch"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Placeholder" }
 authors = [
     { name = "Tobias Henkes", email = "tobias.henkes@uni.lu" }
@@ -36,3 +36,5 @@ so3krates_torch = ["pretrained/so3lr/so3lr.model"]
 [project.scripts]
 torchkrates-jax2torch = "so3krates_torch.cli.jax_to_torch:main"
 torchkrates-torch2jax = "so3krates_torch.cli.torch_to_jax:main"
+torchkrates-eval = "so3krates_torch.cli.run_eval:main"
+torchkrates-test = "so3krates_torch.cli.run_test:main"
