@@ -160,7 +160,7 @@ def evaluate_model(
             layers = range(len(att_scores['inv']))
             # Create batch assignment for edges
             edge_batch = batch.batch[batch.edge_index[0]]  # Assign each edge to its source node's batch
-            for i in range(batch_size):
+            for i in range(len(batch.ptr) - 1):
                 new_att_dict = {
                     'ev': {},
                     'inv': {}
