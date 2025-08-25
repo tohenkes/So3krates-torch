@@ -117,9 +117,10 @@ class EuclideanTransformer(torch.nn.Module):
         receivers: torch.Tensor,
         sh_vectors: torch.Tensor,
         cutoffs: torch.Tensor,
+        return_att: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
-        d_att_inv_features, d_att_ev_features = self.euclidean_attention_block(
+        att_output = self.euclidean_attention_block(
             inv_features,
             ev_features,
             rbf=rbf,
@@ -127,7 +128,18 @@ class EuclideanTransformer(torch.nn.Module):
             receivers=receivers,
             sh_vectors=sh_vectors,
             cutoffs=cutoffs,
+            return_att=return_att,
         )
+        if return_att:
+            (
+                d_att_inv_features, 
+                d_att_ev_features, 
+                (alpha_inv, alpha_ev)
+            ) = att_output
+            
+        else:
+            d_att_inv_features, d_att_ev_features = att_output
+            alpha_inv, alpha_ev = None, None
 
         att_inv_features = inv_features + d_att_inv_features
         att_ev_features = ev_features + d_att_ev_features
@@ -157,7 +169,10 @@ class EuclideanTransformer(torch.nn.Module):
         if self.layer_normalization_2:
             new_inv_features = self.layer_norm_inv_2(new_inv_features)
 
-        return new_inv_features, new_ev_features
+        if return_att:
+            return new_inv_features, new_ev_features, (alpha_inv, alpha_ev)
+        else:
+            return new_inv_features, new_ev_features
 
 
 class EuclideanAttentionBlock(torch.nn.Module):
@@ -254,6 +269,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
         receivers: torch.Tensor,
         sh_vectors: torch.Tensor,
         cutoffs: torch.Tensor,
+        return_att: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         inv_features = inv_features.contiguous()
@@ -346,7 +362,15 @@ class EuclideanAttentionBlock(torch.nn.Module):
             dim=0,
             dim_size=ev_features.shape[0],  # number of nodes
         )
-        return d_att_inv_features, d_att_ev_features
+        if return_att:
+            return (
+                d_att_inv_features, 
+                d_att_ev_features, 
+                (alpha_inv.clone().detach(), 
+                 alpha_ev.clone().detach())
+            )
+        else:
+            return d_att_inv_features, d_att_ev_features
 
 
 class InteractionBlock(torch.nn.Module):

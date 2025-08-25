@@ -30,6 +30,7 @@ def evaluate_model(
     compute_hirshfeld: bool = False,
     compute_dipole: bool = False,
     compute_partial_charges: bool = False,
+    return_att: bool = False,
     dtype: str = "float64",
 ) -> dict[str, Union[np.ndarray, List[np.ndarray]]]:
     """
@@ -107,6 +108,8 @@ def evaluate_model(
         hirshfeld_ratios_list = []
     if compute_partial_charges:
         partial_charges_list = []
+    if return_att:
+        att_scores_list = []
 
     if model_type == "so3lr":
         model.r_max_lr = r_max_lr
@@ -117,7 +120,11 @@ def evaluate_model(
 
     for batch in data_loader:
         batch = batch.to(device)
-        output = model(batch.to_dict(), compute_stress=compute_stress)
+        output = model(
+            batch.to_dict(), 
+            compute_stress=compute_stress,
+            return_att=return_att
+            )
         energies = torch_tools.to_numpy(output["energy"])
         energies = [energy.item() for energy in energies]
         energies_list += energies
@@ -148,6 +155,28 @@ def evaluate_model(
             )[:-1]
             partial_charges_temp_list = [charge for charge in partial_charges]
             partial_charges_list += partial_charges_temp_list
+        if return_att:
+            att_scores = output["att_scores"]
+            layers = range(len(att_scores['inv']))
+            # Create batch assignment for edges
+            edge_batch = batch.batch[batch.edge_index[0]]  # Assign each edge to its source node's batch
+            for i in range(batch_size):
+                new_att_dict = {
+                    'ev': {},
+                    'inv': {}
+                }
+                # Get mask for edges belonging to graph i
+                edge_mask = (edge_batch == i)
+                for layer in layers:
+                    new_att_dict['inv'][layer] = att_scores['inv'][layer][edge_mask]
+                    new_att_dict['ev'][layer] = att_scores['ev'][layer][edge_mask]
+                    # add senders and receivers starting from 0
+                    senders = batch.edge_index[0][edge_mask] - batch.ptr[i]
+                    receivers = batch.edge_index[1][edge_mask] - batch.ptr[i]
+                    new_att_dict['senders'] = senders
+                    new_att_dict['receivers'] = receivers
+                att_scores_list.append(new_att_dict)
+
 
         forces = np.split(
             torch_tools.to_numpy(output["forces"]),
@@ -193,6 +222,9 @@ def evaluate_model(
         "partial_charges": (
             partial_charges if compute_partial_charges else None
         ),
+        "att_scores": (
+            att_scores_list if return_att else None
+        )
     }
 
     return results

@@ -36,6 +36,7 @@ def main():
         "--dispersion_energy_cutoff_lr_damping", type=float, default=2.0
     )
     argparser.add_argument("--dtype", type=str, default="float32")
+    argparser.add_argument("--return_att", action="store_true", default=False)
     args = argparser.parse_args()
 
     # check if path ends with .model or is dir
@@ -69,6 +70,7 @@ def main():
             compute_dipole=args.compute_dipole,
             compute_hirshfeld=args.compute_hirshfeld,
             compute_partial_charges=args.compute_partial_charges,
+            return_att=args.return_att
         )
     else:
         result = ensemble_prediction(

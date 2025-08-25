@@ -216,6 +216,7 @@ class So3krates(torch.nn.Module):
         compute_edge_forces: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
+        return_att: bool = False
     ):
 
         self._get_graph(
@@ -228,7 +229,6 @@ class So3krates(torch.nn.Module):
         self.is_lammps = self.ctx.is_lammps
         self.num_atoms_arange = self.ctx.num_atoms_arange
         self.num_graphs = self.ctx.num_graphs
-        # THIS IS DEPENDENT ON THE NUM OF GRAPHS
         self.displacement = self.ctx.displacement
         self.positions = self.ctx.positions
         # for some reason the vectors in so3krates are pointing in the
@@ -282,8 +282,13 @@ class So3krates(torch.nn.Module):
         rbf = self.radial_embedding(self.lengths)
 
         ######### TRANSFORMER #########
-        for transformer in self.euclidean_transformers:
-            inv_features, ev_features = transformer(
+        if return_att:
+            att_scores = {
+                'inv': {},
+                'ev': {}
+            }
+        for layer_idx, transformer in enumerate(self.euclidean_transformers):
+            transformer_output = transformer(
                 inv_features=inv_features,
                 ev_features=ev_features,
                 rbf=rbf,
@@ -291,8 +296,25 @@ class So3krates(torch.nn.Module):
                 receivers=self.receivers,
                 sh_vectors=sh_vectors,
                 cutoffs=self.cutoffs,
+                return_att=return_att
             )
-        return inv_features, ev_features
+            if return_att:
+                (   
+                    inv_features,
+                    ev_features,
+                    (alpha_inv, alpha_ev)
+                ) = transformer_output
+                att_scores['inv'][layer_idx] = alpha_inv
+                att_scores['ev'][layer_idx] = alpha_ev
+
+            else:
+                inv_features, ev_features = transformer_output
+                
+        if return_att:
+            return inv_features, ev_features, att_scores
+        else:
+            return inv_features, ev_features
+
 
     def forward(
         self,
@@ -306,11 +328,12 @@ class So3krates(torch.nn.Module):
         compute_edge_forces: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
+        return_att: bool = False
     ) -> Dict[str, Optional[torch.Tensor]]:
 
         # Compute num_graphs dynamically from ptr to avoid FX specialization
 
-        inv_features, ev_features = self.get_representation(
+        repr_output = self.get_representation(
             data=data,
             compute_force=compute_force,
             compute_virials=compute_virials,
@@ -319,7 +342,13 @@ class So3krates(torch.nn.Module):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
             lammps_mliap=lammps_mliap,
+            return_att=return_att
         )
+        if return_att:
+            inv_features, ev_features, att_scores = repr_output
+        else:
+            inv_features, ev_features = repr_output
+            
         ######### OUTPUT #########
         atomic_energies = self.atomic_energy_output_block(
             inv_features,
@@ -356,6 +385,7 @@ class So3krates(torch.nn.Module):
             "stress": stress,
             "hessian": hessian,
             "edge_forces": edge_forces,
+            "att_scores": att_scores if return_att else None
         }
 
 
@@ -449,9 +479,10 @@ class SO3LR(So3krates):
         return_descriptors: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
+        return_att: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
 
-        inv_features, ev_features = self.get_representation(
+        repr_output = self.get_representation(
             data=data,
             compute_force=compute_force,
             compute_virials=compute_virials,
@@ -460,7 +491,12 @@ class SO3LR(So3krates):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
             lammps_mliap=lammps_mliap,
+            return_att=return_att
         )
+        if return_att:
+            inv_features, ev_features, att_scores = repr_output
+        else:
+            inv_features, ev_features = repr_output
         ######### OUTPUT #########
         atomic_energies = self.atomic_energy_output_block(
             inv_features,
@@ -568,4 +604,5 @@ class SO3LR(So3krates):
                 hirshfeld_ratios if self.dispersion_energy_bool else None
             ),
             "descriptors": (inv_features if return_descriptors else None),
+            "att_scores": att_scores if return_att else None
         }
