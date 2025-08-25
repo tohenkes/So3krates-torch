@@ -16,7 +16,6 @@ build/
 # IDE
 .idea/
 .vscode/
-*.txt
 *.log
 
 # Distribution
