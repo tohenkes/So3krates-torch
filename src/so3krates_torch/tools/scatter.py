@@ -1,5 +1,5 @@
 """
-TAKEN FROM MACE REPO.
+# Taken from MACE package: https://github.com/ACEsuit/mace
 
 basic scatter_sum operations from torch_scatter from
 https://github.com/mir-group/pytorch_runstats/blob/main/torch_runstats/scatter_sum.py

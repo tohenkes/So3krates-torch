@@ -70,7 +70,7 @@ def main():
             compute_dipole=args.compute_dipole,
             compute_hirshfeld=args.compute_hirshfeld,
             compute_partial_charges=args.compute_partial_charges,
-            return_att=args.return_att
+            return_att=args.return_att,
         )
     else:
         result = ensemble_prediction(

@@ -1,4 +1,5 @@
-# TAKEN FROM MACE REPO #
+# Taken from MACE package: https://github.com/ACEsuit/mace
+# and modified by: Tobias Henkes
 
 
 ###########################################################################################
@@ -22,7 +23,6 @@ from torch.optim.swa_utils import SWALR, AveragedModel
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch_ema import ExponentialMovingAverage
-from torchmetrics import Metric
 
 from mace.cli.visualise_train import TrainingPlotter
 
@@ -31,12 +31,8 @@ from mace.tools.checkpoint import CheckpointHandler, CheckpointState
 from mace.tools.torch_tools import to_numpy
 from mace.tools.utils import (
     MetricsLogger,
-    compute_mae,
-    compute_q95,
-    compute_rel_mae,
-    compute_rel_rmse,
-    compute_rmse,
 )
+from so3krates_torch.tools.eval import ModelEval
 
 
 @dataclasses.dataclass
@@ -127,17 +123,27 @@ def valid_err_log(
         logging.info(
             f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A",
         )
-    elif log_errors == "DipoleRMSE":
-        error_mu = eval_metrics["rmse_mu_per_atom"] * 1e3
+    elif log_errors == "EnergyForceDipoleMAE":
+        error_e = eval_metrics["mae_e_per_atom"] * 1e3
+        error_f = eval_metrics["mae_f"] * 1e3
+        error_dipole = eval_metrics["mae_dipole"] * 1e3
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_MU_per_atom={error_mu:8.2f} mDebye",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_dipole={error_dipole:8.2f} mDebye",
         )
-    elif log_errors == "EnergyDipoleRMSE":
-        error_e = eval_metrics["rmse_e_per_atom"] * 1e3
-        error_f = eval_metrics["rmse_f"] * 1e3
-        error_mu = eval_metrics["rmse_mu_per_atom"] * 1e3
+    elif log_errors == "EnergyForceHirshfeldMAE":
+        error_e = eval_metrics["mae_e_per_atom"] * 1e3
+        error_f = eval_metrics["mae_f"] * 1e3
+        error_hirshfeld_ratios = eval_metrics["mae_hirshfeld_ratios"]
         logging.info(
-            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, RMSE_E_per_atom={error_e:8.2f} meV, RMSE_F={error_f:8.2f} meV / A, RMSE_Mu_per_atom={error_mu:8.2f} mDebye",
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_hirshfeld_ratios={error_hirshfeld_ratios:8.2f}",
+        )
+    elif log_errors == "EnergyForceDipoleHirshfeldMAE":
+        error_e = eval_metrics["mae_e_per_atom"] * 1e3
+        error_f = eval_metrics["mae_f"] * 1e3
+        error_dipole = eval_metrics["mae_dipole"] * 1e3
+        error_hirshfeld_ratios = eval_metrics["mae_hirshfeld_ratios"]
+        logging.info(
+            f"{inintial_phrase}: head: {valid_loader_name}, loss={valid_loss:8.8f}, MAE_E_per_atom={error_e:8.2f} meV, MAE_F={error_f:8.2f} meV / A, MAE_dipole={error_dipole:8.2f} mDebye, MAE_hirshfeld_ratios={error_hirshfeld_ratios:8.2f}",
         )
 
 
@@ -420,7 +426,7 @@ def take_step(
             training=True,
             compute_force=output_args["forces"],
             compute_virials=output_args["virials"],
-            compute_stress=output_args["stress"],
+            compute_stress=output_args["stress"]
         )
         loss = loss_fn(pred=output, ref=batch)
         loss.backward()
@@ -555,7 +561,7 @@ def evaluate(
     for param in model.parameters():
         param.requires_grad = False
 
-    metrics = MACELoss(loss_fn=loss_fn).to(device)
+    metrics = ModelEval(loss_fn=loss_fn).to(device)
 
     start_time = time.time()
     for batch in data_loader:
@@ -579,128 +585,3 @@ def evaluate(
 
     return avg_loss, aux
 
-
-class MACELoss(Metric):
-    def __init__(self, loss_fn: torch.nn.Module):
-        super().__init__()
-        self.loss_fn = loss_fn
-        self.add_state(
-            "total_loss", default=torch.tensor(0.0), dist_reduce_fx="sum"
-        )
-        self.add_state(
-            "num_data", default=torch.tensor(0.0), dist_reduce_fx="sum"
-        )
-        self.add_state(
-            "E_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
-        )
-        self.add_state("delta_es", default=[], dist_reduce_fx="cat")
-        self.add_state("delta_es_per_atom", default=[], dist_reduce_fx="cat")
-        self.add_state(
-            "Fs_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
-        )
-        self.add_state("fs", default=[], dist_reduce_fx="cat")
-        self.add_state("delta_fs", default=[], dist_reduce_fx="cat")
-        self.add_state(
-            "stress_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
-        )
-        self.add_state("delta_stress", default=[], dist_reduce_fx="cat")
-        self.add_state(
-            "virials_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
-        )
-        self.add_state("delta_virials", default=[], dist_reduce_fx="cat")
-        self.add_state(
-            "delta_virials_per_atom", default=[], dist_reduce_fx="cat"
-        )
-        self.add_state(
-            "Mus_computed", default=torch.tensor(0.0), dist_reduce_fx="sum"
-        )
-        self.add_state("mus", default=[], dist_reduce_fx="cat")
-        self.add_state("delta_mus", default=[], dist_reduce_fx="cat")
-        self.add_state("delta_mus_per_atom", default=[], dist_reduce_fx="cat")
-
-    def update(self, batch, output):  # pylint: disable=arguments-differ
-        loss = self.loss_fn(pred=output, ref=batch)
-        self.total_loss += loss
-        self.num_data += batch.num_graphs
-
-        if output.get("energy") is not None and batch.energy is not None:
-            self.E_computed += 1.0
-            self.delta_es.append(batch.energy - output["energy"])
-            self.delta_es_per_atom.append(
-                (batch.energy - output["energy"])
-                / (batch.ptr[1:] - batch.ptr[:-1])
-            )
-        if output.get("forces") is not None and batch.forces is not None:
-            self.Fs_computed += 1.0
-            self.fs.append(batch.forces)
-            self.delta_fs.append(batch.forces - output["forces"])
-        if output.get("stress") is not None and batch.stress is not None:
-            self.stress_computed += 1.0
-            self.delta_stress.append(batch.stress - output["stress"])
-        if output.get("virials") is not None and batch.virials is not None:
-            self.virials_computed += 1.0
-            self.delta_virials.append(batch.virials - output["virials"])
-            self.delta_virials_per_atom.append(
-                (batch.virials - output["virials"])
-                / (batch.ptr[1:] - batch.ptr[:-1]).view(-1, 1, 1)
-            )
-        if output.get("dipole") is not None and batch.dipole is not None:
-            self.Mus_computed += 1.0
-            self.mus.append(batch.dipole)
-            self.delta_mus.append(batch.dipole - output["dipole"])
-            self.delta_mus_per_atom.append(
-                (batch.dipole - output["dipole"])
-                / (batch.ptr[1:] - batch.ptr[:-1]).unsqueeze(-1)
-            )
-
-    def convert(
-        self, delta: Union[torch.Tensor, List[torch.Tensor]]
-    ) -> np.ndarray:
-        if isinstance(delta, list):
-            delta = torch.cat(delta)
-        return to_numpy(delta)
-
-    def compute(self):
-        aux = {}
-        aux["loss"] = to_numpy(self.total_loss / self.num_data).item()
-        if self.E_computed:
-            delta_es = self.convert(self.delta_es)
-            delta_es_per_atom = self.convert(self.delta_es_per_atom)
-            aux["mae_e"] = compute_mae(delta_es)
-            aux["mae_e_per_atom"] = compute_mae(delta_es_per_atom)
-            aux["rmse_e"] = compute_rmse(delta_es)
-            aux["rmse_e_per_atom"] = compute_rmse(delta_es_per_atom)
-            aux["q95_e"] = compute_q95(delta_es)
-        if self.Fs_computed:
-            fs = self.convert(self.fs)
-            delta_fs = self.convert(self.delta_fs)
-            aux["mae_f"] = compute_mae(delta_fs)
-            aux["rel_mae_f"] = compute_rel_mae(delta_fs, fs)
-            aux["rmse_f"] = compute_rmse(delta_fs)
-            aux["rel_rmse_f"] = compute_rel_rmse(delta_fs, fs)
-            aux["q95_f"] = compute_q95(delta_fs)
-        if self.stress_computed:
-            delta_stress = self.convert(self.delta_stress)
-            aux["mae_stress"] = compute_mae(delta_stress)
-            aux["rmse_stress"] = compute_rmse(delta_stress)
-            aux["q95_stress"] = compute_q95(delta_stress)
-        if self.virials_computed:
-            delta_virials = self.convert(self.delta_virials)
-            delta_virials_per_atom = self.convert(self.delta_virials_per_atom)
-            aux["mae_virials"] = compute_mae(delta_virials)
-            aux["rmse_virials"] = compute_rmse(delta_virials)
-            aux["rmse_virials_per_atom"] = compute_rmse(delta_virials_per_atom)
-            aux["q95_virials"] = compute_q95(delta_virials)
-        if self.Mus_computed:
-            mus = self.convert(self.mus)
-            delta_mus = self.convert(self.delta_mus)
-            delta_mus_per_atom = self.convert(self.delta_mus_per_atom)
-            aux["mae_mu"] = compute_mae(delta_mus)
-            aux["mae_mu_per_atom"] = compute_mae(delta_mus_per_atom)
-            aux["rel_mae_mu"] = compute_rel_mae(delta_mus, mus)
-            aux["rmse_mu"] = compute_rmse(delta_mus)
-            aux["rmse_mu_per_atom"] = compute_rmse(delta_mus_per_atom)
-            aux["rel_rmse_mu"] = compute_rel_rmse(delta_mus, mus)
-            aux["q95_mu"] = compute_q95(delta_mus)
-
-        return aux["loss"], aux

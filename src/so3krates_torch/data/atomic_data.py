@@ -70,6 +70,7 @@ class AtomicData(torch_geometric.data.Data):
         virials_weight: Optional[torch.Tensor],  # [,]
         dipole_weight: Optional[torch.Tensor],  # [,]
         charges_weight: Optional[torch.Tensor],  # [,]
+        hirshfeld_ratios_weight: Optional[torch.Tensor],  # [,]
         forces: Optional[torch.Tensor],  # [n_nodes, 3]
         energy: Optional[torch.Tensor],  # [, ]
         stress: Optional[torch.Tensor],  # [1,3,3]
@@ -103,6 +104,7 @@ class AtomicData(torch_geometric.data.Data):
             3,
         ), dipole_weight
         assert charges_weight is None or len(charges_weight.shape) == 0
+        assert hirshfeld_ratios_weight is None or len(hirshfeld_ratios_weight.shape) == 0
         assert cell is None or cell.shape == (3, 3)
         assert forces is None or forces.shape == (num_nodes, 3)
         assert energy is None or len(energy.shape) == 0
@@ -141,6 +143,7 @@ class AtomicData(torch_geometric.data.Data):
             "virials_weight": virials_weight,
             "dipole_weight": dipole_weight,
             "charges_weight": charges_weight,
+            "hirshfeld_ratios_weight": hirshfeld_ratios_weight,
             "forces": forces,
             "energy": energy,
             "stress": stress,
@@ -287,6 +290,15 @@ class AtomicData(torch_geometric.data.Data):
             if config.property_weights.get("charges") is not None
             else torch.tensor(1.0, dtype=torch.get_default_dtype())
         )
+        
+        hirshfeld_ratios_weight = (
+            torch.tensor(
+                config.property_weights.get("hirshfeld_ratios"),
+                dtype=torch.get_default_dtype(),
+            )
+            if config.property_weights.get("hirshfeld_ratios") is not None
+            else torch.tensor(1.0, dtype=torch.get_default_dtype())
+        )
 
         forces = (
             torch.tensor(
@@ -397,6 +409,7 @@ class AtomicData(torch_geometric.data.Data):
             virials_weight=virials_weight,
             dipole_weight=dipole_weight,
             charges_weight=charges_weight,
+            hirshfeld_ratios_weight=hirshfeld_ratios_weight,
             forces=forces,
             energy=energy,
             stress=stress,

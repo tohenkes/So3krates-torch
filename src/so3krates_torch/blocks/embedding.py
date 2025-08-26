@@ -48,9 +48,10 @@ class EuclideanEmbedding(torch.nn.Module):
         sh_vectors: torch.Tensor,
         cutoffs: torch.Tensor,
         receivers: torch.Tensor,
-        inv_avg_num_neighbors: float,
+        avg_num_neighbors: float,
         num_nodes: int,
     ) -> torch.Tensor:
+        inv_avg_num_neighbors = 1.0 / avg_num_neighbors
         if self.initialization_to_zeros:
             ev_embedding = torch.zeros(
                 (num_nodes, sh_vectors.shape[1]),

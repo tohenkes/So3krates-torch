@@ -74,7 +74,7 @@ class TorchkratesCalculator(Calculator):
                 "stress",
                 "partial_charges",
                 "hirshfeld_ratios",
-                "dipole_vec",
+                "dipole",
                 "descriptors",
             ]
         else:
@@ -274,7 +274,7 @@ class TorchkratesCalculator(Calculator):
                     ret_tensors["stress"][i] = out["stress"].detach()
 
             if self.model_type in ["SO3LR"]:
-                ret_tensors["dipole"][i] = out["dipole_vec"].detach()
+                ret_tensors["dipole"][i] = out["dipole"].detach()
                 ret_tensors["partial_charges"][i] = out[
                     "partial_charges"
                 ].detach()

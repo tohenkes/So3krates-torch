@@ -35,7 +35,7 @@ class So3krates(torch.nn.Module):
         num_att_heads: int,
         num_interactions: int,
         num_elements: int,
-        avg_num_neighbors: int,
+        avg_num_neighbors: Optional[float] = None,
         final_mlp_layers: int = 2,
         energy_regression_dim: Optional[int] = None,
         message_normalization: str = "sqrt_num_features",
@@ -59,7 +59,7 @@ class So3krates(torch.nn.Module):
         energy_activation_fn: str = "silu",
         seed: int = 42,
         device: Union[str, torch.device] = "cpu",
-        dtype: Type[torch.dtype] = torch.float32,
+        dtype: Union[str, torch.dtype] = torch.float32,
         layers_behave_like_identity_fn_at_init: bool = False,
         output_is_zero_at_init: bool = False,
         input_convention: str = "positions",
@@ -84,7 +84,8 @@ class So3krates(torch.nn.Module):
                 f"Unknown input convention: {input_convention}"
                 "Only 'positions' is supported at the moment."
             )
-
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype)
         torch.set_default_dtype(dtype)
         self.register_buffer(
             "r_max", torch.tensor(r_max, dtype=torch.get_default_dtype())
@@ -141,8 +142,7 @@ class So3krates(torch.nn.Module):
         self.ev_embedding = embedding.EuclideanEmbedding(
             initialization_to_zeros=initialize_ev_to_zeros,
         )
-        self.avg_num_neighbors = avg_num_neighbors
-        self.inv_avg_num_neighbors = 1.0 / avg_num_neighbors
+        self.avg_num_neighbors = 1. if avg_num_neighbors is None else avg_num_neighbors
 
         self.radial_embedding = radial_basis.ComputeRBF(
             r_max=r_max,
@@ -160,7 +160,7 @@ class So3krates(torch.nn.Module):
                     num_radial_basis=num_radial_basis,
                     interaction_bias=interaction_bias,
                     message_normalization=message_normalization,
-                    avg_num_neighbors=avg_num_neighbors,
+                    avg_num_neighbors=self.avg_num_neighbors,
                     layer_normalization_1=layer_normalization_1,
                     layer_normalization_2=layer_normalization_2,
                     residual_mlp_1=residual_mlp_1,
@@ -216,7 +216,7 @@ class So3krates(torch.nn.Module):
         compute_edge_forces: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
-        return_att: bool = False
+        return_att: bool = False,
     ):
 
         self._get_graph(
@@ -276,17 +276,14 @@ class So3krates(torch.nn.Module):
             sh_vectors=sh_vectors,
             cutoffs=self.cutoffs,
             receivers=self.receivers,
-            inv_avg_num_neighbors=self.inv_avg_num_neighbors,
+            avg_num_neighbors=self.avg_num_neighbors,
             num_nodes=inv_features.shape[0],
         )
         rbf = self.radial_embedding(self.lengths)
 
         ######### TRANSFORMER #########
         if return_att:
-            att_scores = {
-                'inv': {},
-                'ev': {}
-            }
+            att_scores = {"inv": {}, "ev": {}}
         for layer_idx, transformer in enumerate(self.euclidean_transformers):
             transformer_output = transformer(
                 inv_features=inv_features,
@@ -296,25 +293,22 @@ class So3krates(torch.nn.Module):
                 receivers=self.receivers,
                 sh_vectors=sh_vectors,
                 cutoffs=self.cutoffs,
-                return_att=return_att
+                return_att=return_att,
             )
             if return_att:
-                (   
-                    inv_features,
-                    ev_features,
-                    (alpha_inv, alpha_ev)
-                ) = transformer_output
-                att_scores['inv'][layer_idx] = alpha_inv
-                att_scores['ev'][layer_idx] = alpha_ev
+                (inv_features, ev_features, (alpha_inv, alpha_ev)) = (
+                    transformer_output
+                )
+                att_scores["inv"][layer_idx] = alpha_inv
+                att_scores["ev"][layer_idx] = alpha_ev
 
             else:
                 inv_features, ev_features = transformer_output
-                
+
         if return_att:
             return inv_features, ev_features, att_scores
         else:
             return inv_features, ev_features
-
 
     def forward(
         self,
@@ -328,7 +322,7 @@ class So3krates(torch.nn.Module):
         compute_edge_forces: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
-        return_att: bool = False
+        return_att: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
 
         # Compute num_graphs dynamically from ptr to avoid FX specialization
@@ -342,13 +336,13 @@ class So3krates(torch.nn.Module):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
             lammps_mliap=lammps_mliap,
-            return_att=return_att
+            return_att=return_att,
         )
         if return_att:
             inv_features, ev_features, att_scores = repr_output
         else:
             inv_features, ev_features = repr_output
-            
+
         ######### OUTPUT #########
         atomic_energies = self.atomic_energy_output_block(
             inv_features,
@@ -385,7 +379,7 @@ class So3krates(torch.nn.Module):
             "stress": stress,
             "hessian": hessian,
             "edge_forces": edge_forces,
-            "att_scores": att_scores if return_att else None
+            "att_scores": att_scores if return_att else None,
         }
 
 
@@ -425,7 +419,7 @@ class SO3LR(So3krates):
                 regression_dim=self.energy_regression_dim,
                 activation_fn=self.energy_activation_fn,
             )
-            self.dipole_vec_output_head = DipoleVecOutputHead()
+            self.dipole_output_head = DipoleVecOutputHead()
             self.electrostatic_potential = ElectrostaticInteraction(
                 neighborlist_format=neighborlist_format
             )
@@ -491,7 +485,7 @@ class SO3LR(So3krates):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
             lammps_mliap=lammps_mliap,
-            return_att=return_att
+            return_att=return_att,
         )
         if return_att:
             inv_features, ev_features, att_scores = repr_output
@@ -530,7 +524,7 @@ class SO3LR(So3krates):
                 num_graphs=self.num_graphs,
             )
 
-            dipole_vec = self.dipole_vec_output_head(
+            dipole = self.dipole_output_head(
                 partial_charges=partial_charges,
                 positions=self.positions,
                 batch_segments=data["batch"],
@@ -597,12 +591,12 @@ class SO3LR(So3krates):
             "partial_charges": (
                 partial_charges if self.electrostatic_energy_bool else None
             ),
-            "dipole_vec": (
-                dipole_vec if self.electrostatic_energy_bool else None
+            "dipole": (
+                dipole if self.electrostatic_energy_bool else None
             ),
             "hirshfeld_ratios": (
                 hirshfeld_ratios if self.dispersion_energy_bool else None
             ),
             "descriptors": (inv_features if return_descriptors else None),
-            "att_scores": att_scores if return_att else None
+            "att_scores": att_scores if return_att else None,
         }

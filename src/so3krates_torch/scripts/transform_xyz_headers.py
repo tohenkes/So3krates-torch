@@ -23,6 +23,6 @@ def process_xyz(input_file, output_file):
 
 
 process_xyz(
-    "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/example/aqm_small.xyz",
-    "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/example/aqm_small.xyz",
+    "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/development_junk/md17_ethanol_small.xyz",
+    "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/development_junk/training/md17_ethanol_small.xyz",
 )

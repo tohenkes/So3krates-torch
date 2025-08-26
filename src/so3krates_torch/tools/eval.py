@@ -4,6 +4,7 @@ import numpy as np
 from typing import Tuple, List, Union, Optional
 from mace import data as mace_data
 from mace.tools import torch_geometric, torch_tools
+from mace.tools.torch_tools import to_numpy
 from mace.tools.utils import (
     MetricsLogger,
     compute_mae,
@@ -66,7 +67,7 @@ def evaluate_model(
             - "forces": Predicted forces
             - "stresses": Predicted stress tensors (if compute_stress=True,
                          else None)
-            - "dipole_vecs": Predicted dipole vectors (if compute_dipole=True,
+            - "dipoles": Predicted dipole vectors (if compute_dipole=True,
                             else None)
             - "hirshfeld_ratios": Predicted Hirshfeld ratios (if
                                  compute_hirshfeld=True, else None)
@@ -121,10 +122,10 @@ def evaluate_model(
     for batch in data_loader:
         batch = batch.to(device)
         output = model(
-            batch.to_dict(), 
+            batch.to_dict(),
             compute_stress=compute_stress,
-            return_att=return_att
-            )
+            return_att=return_att,
+        )
         energies = torch_tools.to_numpy(output["energy"])
         energies = [energy.item() for energy in energies]
         energies_list += energies
@@ -134,7 +135,7 @@ def evaluate_model(
             stresses = [stress for stress in stresses]
             stresses_list += stresses
         if compute_dipole:
-            dipoles = torch_tools.to_numpy(output["dipole_vec"])
+            dipoles = torch_tools.to_numpy(output["dipole"])
             dipoles = [dipole for dipole in dipoles]
             dipoles_list += dipoles
         if compute_hirshfeld:
@@ -157,26 +158,28 @@ def evaluate_model(
             partial_charges_list += partial_charges_temp_list
         if return_att:
             att_scores = output["att_scores"]
-            layers = range(len(att_scores['inv']))
+            layers = range(len(att_scores["inv"]))
             # Create batch assignment for edges
-            edge_batch = batch.batch[batch.edge_index[0]]  # Assign each edge to its source node's batch
+            edge_batch = batch.batch[
+                batch.edge_index[0]
+            ]  # Assign each edge to its source node's batch
             for i in range(len(batch.ptr) - 1):
-                new_att_dict = {
-                    'ev': {},
-                    'inv': {}
-                }
+                new_att_dict = {"ev": {}, "inv": {}}
                 # Get mask for edges belonging to graph i
-                edge_mask = (edge_batch == i)
+                edge_mask = edge_batch == i
                 for layer in layers:
-                    new_att_dict['inv'][layer] = att_scores['inv'][layer][edge_mask]
-                    new_att_dict['ev'][layer] = att_scores['ev'][layer][edge_mask]
+                    new_att_dict["inv"][layer] = att_scores["inv"][layer][
+                        edge_mask
+                    ]
+                    new_att_dict["ev"][layer] = att_scores["ev"][layer][
+                        edge_mask
+                    ]
                     # add senders and receivers starting from 0
                     senders = batch.edge_index[0][edge_mask] - batch.ptr[i]
                     receivers = batch.edge_index[1][edge_mask] - batch.ptr[i]
-                    new_att_dict['senders'] = senders
-                    new_att_dict['receivers'] = receivers
+                    new_att_dict["senders"] = senders
+                    new_att_dict["receivers"] = receivers
                 att_scores_list.append(new_att_dict)
-
 
         forces = np.split(
             torch_tools.to_numpy(output["forces"]),
@@ -217,14 +220,12 @@ def evaluate_model(
         "energies": energies,
         "forces": forces,
         "stresses": stresses if compute_stress else None,
-        "dipole_vecs": dipoles if compute_dipole else None,
+        "dipoles": dipoles if compute_dipole else None,
         "hirshfeld_ratios": hirshfeld if compute_hirshfeld else None,
         "partial_charges": (
             partial_charges if compute_partial_charges else None
         ),
-        "att_scores": (
-            att_scores_list if return_att else None
-        )
+        "att_scores": (att_scores_list if return_att else None),
     }
 
     return results
@@ -285,7 +286,7 @@ def ensemble_prediction(
                          else None)
             - 'hirshfeld_ratios': Hirshfeld ratio predictions (if
                                  compute_hirshfeld=True, else None)
-            - 'dipole_vecs': Dipole vector predictions (if compute_dipole=True,
+            - 'dipoles': Dipole vector predictions (if compute_dipole=True,
                             else None)
             - 'partial_charges': Partial charge predictions (if
                                 compute_partial_charges=True, else None)
@@ -332,7 +333,7 @@ def ensemble_prediction(
         if compute_hirshfeld:
             all_hirshfeld.append(results["hirshfeld_ratios"])
         if compute_dipole:
-            all_dipoles.append(results["dipole_vecs"])
+            all_dipoles.append(results["dipoles"])
         if compute_partial_charges:
             all_partial_charges.append(results["partial_charges"])
         i += 1
@@ -368,7 +369,7 @@ def ensemble_prediction(
         "forces": all_forces,
         "stresses": all_stresses if compute_stress else None,
         "hirshfeld_ratios": all_hirshfeld if compute_hirshfeld else None,
-        "dipole_vecs": all_dipoles if compute_dipole else None,
+        "dipoles": all_dipoles if compute_dipole else None,
         "partial_charges": (
             all_partial_charges if compute_partial_charges else None
         ),
@@ -378,8 +379,11 @@ def ensemble_prediction(
 
 
 class ModelEval(Metric):
-    def __init__(self):
+    def __init__(self, loss_fn: Optional[torch.nn.Module] = None) -> None:
         super().__init__()
+        self.loss_fn = loss_fn
+        
+        self.add_state("total_loss", default=torch.tensor(0.0), dist_reduce_fx="sum")
         self.add_state(
             "num_data", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
@@ -408,12 +412,12 @@ class ModelEval(Metric):
             "delta_virials_per_atom", default=[], dist_reduce_fx="cat"
         )
         self.add_state(
-            "dipole_vecs_computed",
+            "dipoles_computed",
             default=torch.tensor(0.0),
             dist_reduce_fx="sum",
         )
-        self.add_state("dipole_vecs", default=[], dist_reduce_fx="cat")
-        self.add_state("delta_dipole_vecs", default=[], dist_reduce_fx="cat")
+        self.add_state("dipoles", default=[], dist_reduce_fx="cat")
+        self.add_state("delta_dipoles", default=[], dist_reduce_fx="cat")
 
         self.add_state(
             "hirshfeld_ratios_computed",
@@ -429,6 +433,9 @@ class ModelEval(Metric):
         )
 
     def update(self, batch, output):  # pylint: disable=arguments-differ
+        if self.loss_fn is not None:
+            loss = self.loss_fn(pred=output, ref=batch)
+            self.total_loss += loss
         self.num_data += batch.num_graphs
 
         if output.get("energy") is not None and batch.energy is not None:
@@ -456,10 +463,10 @@ class ModelEval(Metric):
                 (batch.virials - output["virials"])
                 / (batch.ptr[1:] - batch.ptr[:-1]).view(-1, 1, 1)
             )
-        if output.get("dipole_vec") is not None and batch.dipole is not None:
-            self.dipole_vecs_computed += 1.0
-            self.dipole_vecs.append(batch.dipole)
-            self.delta_dipole_vecs.append(batch.dipole - output["dipole_vec"])
+        if output.get("dipole") is not None and batch.dipole is not None:
+            self.dipoles_computed += 1.0
+            self.dipoles.append(batch.dipole)
+            self.delta_dipoles.append(batch.dipole - output["dipole"])
 
         if (
             output.get("hirshfeld_ratios") is not None
@@ -480,6 +487,8 @@ class ModelEval(Metric):
 
     def compute(self):
         aux = {}
+        if self.loss_fn is not None:
+            aux["loss"] = to_numpy(self.total_loss / self.num_data).item()
         if self.E_computed:
             delta_es = self.convert(self.delta_es)
             delta_es_per_atom = self.convert(self.delta_es_per_atom)
@@ -514,19 +523,22 @@ class ModelEval(Metric):
             aux["rmse_virials_per_atom"] = compute_rmse(delta_virials_per_atom)
             aux["q95_virials"] = compute_q95(delta_virials)
 
-        if self.dipole_vecs_computed:
-            delta_dipole_vecs = self.convert(self.delta_dipole_vecs)
-            aux["mae_dipole_vec"] = compute_mae(delta_dipole_vecs)
-            aux["rmse_dipole_vec"] = compute_rmse(delta_dipole_vecs)
-            aux["q95_dipole_vec"] = compute_q95(delta_dipole_vecs)
+        if self.dipoles_computed:
+            delta_dipoles = self.convert(self.delta_dipoles)
+            aux["mae_dipole"] = compute_mae(delta_dipoles)
+            aux["rmse_dipole"] = compute_rmse(delta_dipoles)
+            aux["q95_dipole"] = compute_q95(delta_dipoles)
 
         if self.hirshfeld_ratios_computed:
             delta_hirshfeld_ratios = self.convert(self.delta_hirshfeld_ratios)
             aux["mae_hirshfeld_ratios"] = compute_mae(delta_hirshfeld_ratios)
             aux["rmse_hirshfeld_ratios"] = compute_rmse(delta_hirshfeld_ratios)
             aux["q95_hirshfeld_ratios"] = compute_q95(delta_hirshfeld_ratios)
-
-        return aux
+        
+        if self.loss_fn is not None:
+            return aux["loss"], aux
+        else:
+            return aux
 
 
 def test_model(
@@ -566,8 +578,8 @@ def test_model(
             predictions["stress"] = []
         if output_args.get("virials", False):
             predictions["virials"] = []
-        if output_args.get("dipole_vec", False):
-            predictions["dipole_vec"] = []
+        if output_args.get("dipole", False):
+            predictions["dipole"] = []
         if output_args.get("hirshfeld_ratios", False):
             predictions["hirshfeld_ratios"] = []
 
@@ -598,8 +610,8 @@ def test_model(
                 predictions["stress"].append(output["stress"])
             if output_args.get("virials", False):
                 predictions["virials"].append(output["virials"])
-            if output_args.get("dipole_vec", False):
-                predictions["dipole_vec"].append(output["dipole_vec"])
+            if output_args.get("dipole", False):
+                predictions["dipole"].append(output["dipole"])
             if output_args.get("hirshfeld_ratios", False):
                 predictions["hirshfeld_ratios"].append(
                     output["hirshfeld_ratios"]
@@ -800,15 +812,15 @@ def test_ensemble(
                 f"MAE_E={error_e:.1f} meV, MAE_F={error_f:.1f} meV / A"
             )
         elif log_errors == "DipoleRMSE":
-            error_mu = avg_ensemble_metrics["rmse_dipole_vec"] * 1e3
-            logging.info(f"RMSE_dipole_vec={error_mu:.2f} mDebye")
+            error_mu = avg_ensemble_metrics["rmse_dipole"] * 1e3
+            logging.info(f"RMSE_dipole={error_mu:.2f} mDebye")
         elif log_errors == "EnergyDipoleRMSE":
             error_e = avg_ensemble_metrics["rmse_e_per_atom"] * 1e3
             error_f = avg_ensemble_metrics["rmse_f"] * 1e3
-            error_mu = avg_ensemble_metrics["rmse_dipole_vec"] * 1e3
+            error_mu = avg_ensemble_metrics["rmse_dipole"] * 1e3
             logging.info(
                 f"RMSE_E_per_atom={error_e:.1f} meV, RMSE_F={error_f:.1f}"
-                f"meV / A, RMSE_dipole_vec={error_mu:.2f} mDebye"
+                f"meV / A, RMSE_dipole={error_mu:.2f} mDebye"
             )
 
     return (avg_ensemble_metrics, ensemble_metrics)

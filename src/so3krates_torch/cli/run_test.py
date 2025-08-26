@@ -109,7 +109,7 @@ def main():
         "forces",
         "stress",
         "virials",
-        "dipole_vec",
+        "dipole",
         "hirshfeld_ratios",
     ]
     output_args = {}
@@ -125,8 +125,8 @@ def main():
             output_args["stress"] = True
         if arg == "virials":
             output_args["virials"] = True
-        if arg == "dipole_vec":
-            output_args["dipole_vec"] = True
+        if arg == "dipole":
+            output_args["dipole"] = True
         if arg == "hirshfeld_ratios":
             output_args["hirshfeld_ratios"] = True
 

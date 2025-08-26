@@ -117,7 +117,7 @@ class EuclideanTransformer(torch.nn.Module):
         receivers: torch.Tensor,
         sh_vectors: torch.Tensor,
         cutoffs: torch.Tensor,
-        return_att: bool = False
+        return_att: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         att_output = self.euclidean_attention_block(
@@ -131,12 +131,10 @@ class EuclideanTransformer(torch.nn.Module):
             return_att=return_att,
         )
         if return_att:
-            (
-                d_att_inv_features, 
-                d_att_ev_features, 
-                (alpha_inv, alpha_ev)
-            ) = att_output
-            
+            (d_att_inv_features, d_att_ev_features, (alpha_inv, alpha_ev)) = (
+                att_output
+            )
+
         else:
             d_att_inv_features, d_att_ev_features = att_output
             alpha_inv, alpha_ev = None, None
@@ -269,7 +267,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
         receivers: torch.Tensor,
         sh_vectors: torch.Tensor,
         cutoffs: torch.Tensor,
-        return_att: bool = False
+        return_att: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
 
         inv_features = inv_features.contiguous()
@@ -364,10 +362,9 @@ class EuclideanAttentionBlock(torch.nn.Module):
         )
         if return_att:
             return (
-                d_att_inv_features, 
-                d_att_ev_features, 
-                (alpha_inv.clone().detach(), 
-                 alpha_ev.clone().detach())
+                d_att_inv_features,
+                d_att_ev_features,
+                (alpha_inv.clone().detach(), alpha_ev.clone().detach()),
             )
         else:
             return d_att_inv_features, d_att_ev_features
