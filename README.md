@@ -14,7 +14,7 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 5. `pip install .`
 
 #### Implemented features:
-1. ASE calculator for MD
+1. ASE calculator for MD (including pre-trained SO3LR)
 2. Inference over ase readable datasets: `torchkrates-eval`
 3. Error metrics over ase readable datasets: `torchkrates-test`
 4. Transforming pyTorch and JAX parameter formates: `torchkrates-jax2torch` or `torchkrates-torch2jax`
