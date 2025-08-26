@@ -1,5 +1,8 @@
 # So3krates-torch
 
+> [!IMPORTANT]
+> The code is work in progress! There may be breaking changes!
+
 Lightweight implementation of the So3krates model in pytorch. This package is mostly intended for [aims-PAX](https://github.com/tohenkes/aims-PAX) but is still a function implementation of [So3krates](https://github.com/thorben-frank/mlff) and [SO3LR](https://github.com/general-molecular-simulations/so3lr) in pytorch. For now it uses (modified) source code of the [MACE](https://github.com/ACEsuit/mace) package and follows its style, so many functions are actually compatible.
 
 #### Installation
