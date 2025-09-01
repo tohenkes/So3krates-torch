@@ -94,4 +94,4 @@ For bugs or feature requests, please use [GitHub Issues](https://github.com/tohe
 
 ## License
 
-The *aims-PAX* code is published and distributed under the [MIT License](MIT.md).
+The code is published and distributed under the [MIT License](MIT.md).
