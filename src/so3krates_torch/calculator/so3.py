@@ -14,9 +14,8 @@ import numpy as np
 from so3krates_torch.data.atomic_data import AtomicData as So3Data
 from mace.tools import torch_geometric, torch_tools, utils
 from mace import data
-from mace.data.utils import (
-    KeySpecification
-)
+from mace.data.utils import KeySpecification
+
 
 def get_model_dtype(model: torch.nn.Module) -> torch.dtype:
     """Get the dtype of the model"""
@@ -55,11 +54,8 @@ class TorchkratesCalculator(Calculator):
             )
         self.results = {}
         if key_specification is None:
-            arrays_keys = {
-            "forces": "REF_forces",
-            "charges": "REF_charges"
-            }
-            
+            arrays_keys = {"forces": "REF_forces", "charges": "REF_charges"}
+
             info_keys = {
                 "energy": "REF_energy",
                 "stress": "REF_stress",
@@ -67,12 +63,11 @@ class TorchkratesCalculator(Calculator):
                 "polarizability": "REF_polarizability",
                 "head": "REF_head",
                 "total_charge": "total_charge",
-                "total_spin": "total_spin"
+                "total_spin": "total_spin",
             }
-            
+
             self.key_specification = KeySpecification(
-                info_keys=info_keys,
-                arrays_keys=arrays_keys
+                info_keys=info_keys, arrays_keys=arrays_keys
             )
         else:
             self.key_specification = key_specification
@@ -230,21 +225,20 @@ class TorchkratesCalculator(Calculator):
         return dict_of_tensors
 
     def _atoms_to_batch(self, atoms):
-        self.key_specification.update(
-            arrays_keys={self.charges_key: "Qs"}
-        )
-        
+        self.key_specification.update(arrays_keys={self.charges_key: "Qs"})
+
         config = data.config_from_atoms(
-            atoms, 
-            key_specification=self.key_specification
-            )
+            atoms, key_specification=self.key_specification
+        )
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
                 So3Data.from_config(
                     config,
                     z_table=self.z_table,
                     cutoff=self.r_max,
-                    cutoff_lr=float(10e5) if self.r_max_lr is None else self.r_max_lr,
+                    cutoff_lr=float(10e5)
+                    if self.r_max_lr is None
+                    else self.r_max_lr,
                 )
             ],
             batch_size=1,
@@ -277,7 +271,6 @@ class TorchkratesCalculator(Calculator):
         ret_tensors = self._create_result_tensors(
             self.model_type, self.num_models, len(atoms)
         )
-
         for i, model in enumerate(self.models):
             batch = self._clone_batch(batch_base)
             out = model(
@@ -443,7 +436,6 @@ class SO3LRCalculator(TorchkratesCalculator):
         arrays_keys=None,
         **kwargs,
     ):
-
         models = [self._load_model(device)]
         model_paths = None  # No need for model paths in this case
         super().__init__(

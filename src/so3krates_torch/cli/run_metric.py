@@ -8,7 +8,6 @@ import logging
 
 
 def main():
-
     parser = argparse.ArgumentParser(description="Test ensemble of models")
     parser.add_argument(
         "--models", type=str, help="Path to models", required=True

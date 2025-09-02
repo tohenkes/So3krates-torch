@@ -24,6 +24,9 @@ dependencies = [
     "pyYaml",
 ]
 
+[project.optional-dependencies]
+dev = ["pre-commit", "pytest"]
+
 [project.urls]
 homepage = "https://github.com/tohenkes/So3krates-torch"
 
@@ -33,8 +36,12 @@ where = ["src"]
 [tool.setuptools.package-data]
 so3krates_torch = ["pretrained/so3lr/so3lr.model"]
 
+[tool.pytest.ini_options]
+testpaths = ["src/so3krates_torch/tests"]
+pythonpath = ["src"]
+
 [project.scripts]
 torchkrates-jax2torch = "so3krates_torch.cli.jax_to_torch:main"
 torchkrates-torch2jax = "so3krates_torch.cli.torch_to_jax:main"
 torchkrates-eval = "so3krates_torch.cli.run_eval:main"
-torchkrates-test = "so3krates_torch.cli.run_test:main"
+torchkrates-metric = "so3krates_torch.cli.run_metric:main"
