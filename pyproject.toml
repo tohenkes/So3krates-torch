@@ -3,25 +3,50 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "torchkrates"
+name = "So3krates-torch"
 version = "0.1"
-description = "Implementation of So3krates in pytorch"
+description = "PyTorch implementation of So3krates neural network potential for atomistic simulations"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Placeholder" }
+license = { text = "MIT" }
 authors = [
     { name = "Tobias Henkes", email = "tobias.henkes@uni.lu" }
 ]
-keywords = []
+maintainers = [
+    { name = "Tobias Henkes", email = "tobias.henkes@uni.lu" }
+]
+keywords = [
+    "machine-learning", 
+    "molecular-dynamics", 
+    "neural-networks", 
+    "pytorch", 
+    "atomistic-simulations",
+    "equivariant-networks",
+    "interatomic-potentials"
+]
 classifiers = [
-    "Programming Language :: Python :: 3"
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: Linux",
+    "Environment :: GPU :: NVIDIA CUDA",
 ]
 dependencies = [
-    "ase",
-    "numpy",
-    "mace-torch",
-    "torch",
-    "pyYaml",
+    "ase>=3.26.0",
+    "h5py>=3.14.0",
+    "mace-torch>=0.3.14",
+    "numpy>=1.26.4",
+    "pyyaml>=6.0.2",
+    "torch>=2.8.0",
+    "torchvision>=0.23.0",
+    "torchaudio>=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +54,12 @@ dev = ["pre-commit", "pytest"]
 
 [project.urls]
 homepage = "https://github.com/tohenkes/So3krates-torch"
+repository = "https://github.com/tohenkes/So3krates-torch"
+documentation = "https://github.com/tohenkes/So3krates-torch#readme"
+changelog = "https://github.com/tohenkes/So3krates-torch/blob/main/CHANGELOG.md"
+issues = "https://github.com/tohenkes/So3krates-torch/issues"
+"Bug Reports" = "https://github.com/tohenkes/So3krates-torch/issues"
+"Source Code" = "https://github.com/tohenkes/So3krates-torch"
 
 [tool.setuptools.packages.find]
 where = ["src"]
