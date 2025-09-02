@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/psf/black
-    rev: 23.9.1  # specify the version you want
+    rev: 23.9.1
     hooks:
       - id: black
         entry: black -l 79
