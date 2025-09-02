@@ -432,8 +432,7 @@ class SO3LRCalculator(TorchkratesCalculator):
         length_units_to_A: float = 1.0,
         default_dtype="",
         charges_key="Qs",
-        info_keys=None,
-        arrays_keys=None,
+        key_specification=None,
         **kwargs,
     ):
         models = [self._load_model(device)]
@@ -449,8 +448,7 @@ class SO3LRCalculator(TorchkratesCalculator):
             length_units_to_A=length_units_to_A,
             default_dtype=default_dtype,
             charges_key=charges_key,
-            info_keys=info_keys,
-            arrays_keys=arrays_keys,
+            key_specification=key_specification,
             model_type="SO3LR",
             **kwargs,
         )
