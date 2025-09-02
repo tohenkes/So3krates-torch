@@ -14,7 +14,9 @@ import numpy as np
 from so3krates_torch.data.atomic_data import AtomicData as So3Data
 from mace.tools import torch_geometric, torch_tools, utils
 from mace import data
-
+from mace.data.utils import (
+    KeySpecification
+)
 
 def get_model_dtype(model: torch.nn.Module) -> torch.dtype:
     """Get the dtype of the model"""
@@ -41,8 +43,7 @@ class TorchkratesCalculator(Calculator):
         length_units_to_A: float = 1.0,
         default_dtype="",
         charges_key="charges",
-        info_keys=None,
-        arrays_keys=None,
+        key_specification: Optional[KeySpecification] = None,
         model_type="SO3LR",
         fullgraph=True,
         **kwargs,
@@ -53,16 +54,29 @@ class TorchkratesCalculator(Calculator):
                 "Exactly one of 'model_paths' or 'models' must be provided"
             )
         self.results = {}
-        if info_keys is None:
-            info_keys = {
-                "total_spin": "total_spin",
-                "total_charge": "total_charge",
+        if key_specification is None:
+            arrays_keys = {
+            "forces": "REF_forces",
+            "charges": "REF_charges"
             }
-        if arrays_keys is None:
-            arrays_keys = {}
+            
+            info_keys = {
+                "energy": "REF_energy",
+                "stress": "REF_stress",
+                "dipole": "REF_dipole",
+                "polarizability": "REF_polarizability",
+                "head": "REF_head",
+                "total_charge": "total_charge",
+                "total_spin": "total_spin"
+            }
+            
+            self.key_specification = KeySpecification(
+                info_keys=info_keys,
+                arrays_keys=arrays_keys
+            )
+        else:
+            self.key_specification = key_specification
 
-        self.info_keys = info_keys
-        self.arrays_keys = arrays_keys
         self.compute_stress = compute_stress
 
         self.model_type = model_type
@@ -216,18 +230,21 @@ class TorchkratesCalculator(Calculator):
         return dict_of_tensors
 
     def _atoms_to_batch(self, atoms):
-        self.arrays_keys.update({self.charges_key: "Qs"})
-        keyspec = data.KeySpecification(
-            info_keys=self.info_keys, arrays_keys=self.arrays_keys
+        self.key_specification.update(
+            arrays_keys={self.charges_key: "Qs"}
         )
-        config = data.config_from_atoms(atoms, key_specification=keyspec)
+        
+        config = data.config_from_atoms(
+            atoms, 
+            key_specification=self.key_specification
+            )
         data_loader = torch_geometric.dataloader.DataLoader(
             dataset=[
                 So3Data.from_config(
                     config,
                     z_table=self.z_table,
                     cutoff=self.r_max,
-                    cutoff_lr=self.r_max_lr,
+                    cutoff_lr=float(10e5) if self.r_max_lr is None else self.r_max_lr,
                 )
             ],
             batch_size=1,
