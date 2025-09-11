@@ -18,22 +18,17 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 2. Inference over ase readable datasets: `torchkrates-eval`
 3. Error metrics over ase readable datasets: `torchkrates-test`
 4. Transforming pyTorch and JAX parameter formates: `torchkrates-jax2torch` or `torchkrates-torch2jax`
-5. Training is WIP but `train` in `tools.train` is already working so you can easily build your own script
+5. Training: `torchkrates-train --config config.yaml` (see example)
 
 
 > [!IMPORTANT]
-> Number 4 means that you can transform the weights from this pytorch version into the JAX version and vice versa. Inference and training is much faster (*at least 1 order of magnitude*) in the JAX version. This implementation is mostly for prototyping and compatability with other packages.
+> Number 4 means that you can transform the weights from this pytorch version into the JAX version and vice versa. Inference and training is much faster (*at least 1 order of magnitude at the moment*) in the JAX version. This implementation is mostly for prototyping and compatability with other packages.
 
 
 
 ## TODO
-
-- [ ] training
-    - [x] hirshfeld loss
-    - [ ] load trainings params from yaml
-    - [ ] script
+- [ ] test loading/training hirshfeld ratios, partial charges
 - [ ] finetuning
-- [ ] save and load hyperparameter json from torchkrates
 - [ ] enable torch.script (important for openmm)
 
 
@@ -41,13 +36,24 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 If you are using the models implemented here please cite:
 
 ```bibtex
-@article{kabylda2024molecular,
-  title={Molecular Simulations with a Pretrained Neural Network and Universal Pairwise Force Fields},
-  author={Kabylda, A. and Frank, J. T. and Dou, S. S. and Khabibrakhmanov, A. and Sandonas, L. M.
-          and Unke, O. T. and Chmiela, S. and M{\"u}ller, K.R. and Tkatchenko, A.},
-  journal={ChemRxiv},
-  year={2024},
-  doi={10.26434/chemrxiv-2024-bdfr0-v2}
+@article{doi:10.1021/jacs.5c09558,
+author = {Kabylda, Adil and Frank, J. Thorben and Suárez-Dou, Sergio and Khabibrakhmanov, Almaz and Medrano Sandonas, Leonardo and Unke, Oliver T. and Chmiela, Stefan and M{\"u}ller, Klaus-Robert and Tkatchenko, Alexandre},
+title = {Molecular Simulations with a Pretrained Neural Network and Universal Pairwise Force Fields},
+journal = {Journal of the American Chemical Society},
+volume = {0},
+number = {0},
+pages = {null},
+year = {0},
+doi = {10.1021/jacs.5c09558},
+    note ={PMID: 40886167},
+URL = { 
+    
+        https://doi.org/10.1021/jacs.5c09558
+},
+eprint = { 
+    
+        https://doi.org/10.1021/jacs.5c09558
+}
 }
 
 @article{frank2024euclidean,

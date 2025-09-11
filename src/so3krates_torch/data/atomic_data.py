@@ -104,7 +104,10 @@ class AtomicData(torch_geometric.data.Data):
             3,
         ), dipole_weight
         assert charges_weight is None or len(charges_weight.shape) == 0
-        assert hirshfeld_ratios_weight is None or len(hirshfeld_ratios_weight.shape) == 0
+        assert (
+            hirshfeld_ratios_weight is None
+            or len(hirshfeld_ratios_weight.shape) == 0
+        )
         assert cell is None or cell.shape == (3, 3)
         assert forces is None or forces.shape == (num_nodes, 3)
         assert energy is None or len(energy.shape) == 0
@@ -290,7 +293,7 @@ class AtomicData(torch_geometric.data.Data):
             if config.property_weights.get("charges") is not None
             else torch.tensor(1.0, dtype=torch.get_default_dtype())
         )
-        
+
         hirshfeld_ratios_weight = (
             torch.tensor(
                 config.property_weights.get("hirshfeld_ratios"),

@@ -236,9 +236,9 @@ class TorchkratesCalculator(Calculator):
                     config,
                     z_table=self.z_table,
                     cutoff=self.r_max,
-                    cutoff_lr=float(10e5)
-                    if self.r_max_lr is None
-                    else self.r_max_lr,
+                    cutoff_lr=(
+                        float(10e5) if self.r_max_lr is None else self.r_max_lr
+                    ),
                 )
             ],
             batch_size=1,

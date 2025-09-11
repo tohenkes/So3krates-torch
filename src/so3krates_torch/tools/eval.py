@@ -382,8 +382,10 @@ class ModelEval(Metric):
     def __init__(self, loss_fn: Optional[torch.nn.Module] = None) -> None:
         super().__init__()
         self.loss_fn = loss_fn
-        
-        self.add_state("total_loss", default=torch.tensor(0.0), dist_reduce_fx="sum")
+
+        self.add_state(
+            "total_loss", default=torch.tensor(0.0), dist_reduce_fx="sum"
+        )
         self.add_state(
             "num_data", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
@@ -534,7 +536,7 @@ class ModelEval(Metric):
             aux["mae_hirshfeld_ratios"] = compute_mae(delta_hirshfeld_ratios)
             aux["rmse_hirshfeld_ratios"] = compute_rmse(delta_hirshfeld_ratios)
             aux["q95_hirshfeld_ratios"] = compute_q95(delta_hirshfeld_ratios)
-        
+
         if self.loss_fn is not None:
             return aux["loss"], aux
         else:

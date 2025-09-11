@@ -1,0 +1,70 @@
+GENERAL:
+  name_exp: my_model
+  checkpoints_dir: ./checkpoints
+  model_dir: ./model
+  log_dir: ./logs
+  default_dtype: float32
+  compute_stress: False
+  seed: 100
+
+ARCHITECTURE:
+  activation_fn: silu
+  r_max: 4.5
+  cutoff_lr: null
+  cutoff_fn: phys
+  degrees: [1, 2, 3, 4]
+  dispersion_energy_bool: true
+  dispersion_energy_scale: 1.2
+  dispersion_energy_cutoff_lr_damping: 12.0  
+  electrostatic_energy_bool: true
+  electrostatic_energy_scale: 4.0
+  energy_activation_fn: silu
+  energy_learn_atomic_type_scales: true
+  energy_learn_atomic_type_shifts: true
+  energy_regression_dim: 128
+  input_convention: positions
+  layer_normalization_1: true
+  layer_normalization_2: true
+  message_normalization: avg_num_neighbors
+  num_features: 128
+  num_heads: 4
+  num_layers: 3
+  num_radial_basis_fn: 32
+  qk_non_linearity: identity
+  radial_basis_fn: bernstein
+  residual_mlp_1: true
+  residual_mlp_2: false
+  use_charge_embed: true
+  use_spin_embed: true
+  zbl_repulsion_bool: true
+  neighborlist_format_lr: sparse
+  compute_avg_num_neighbors: True
+
+TRAINING:
+  batch_size: 5
+  valid_batch_size: 5
+  weight_decay: 0.
+  lr: 0.001
+  optimizer: adam
+  scheduler: exponential_decay 
+  lr_scheduler_gamma: 0.9993
+  ema: True
+  ema_decay: 0.99
+  energy_weight: 1.
+  forces_weight: 1000.
+  eval_interval: 5
+  num_epochs: 150
+  path_to_train_data: ./md17_ethanol_small.xyz
+  valid_ratio: 0.1
+  clip_grad: 10.0
+  neighbors_lr_cutoff: 100.
+  patience: 50
+
+MISC:
+  device: cuda
+  keep_checkpoints: False
+  restart_latest: True 
+  error_table: PerAtomMAE
+  log_level: INFO
+  log_wandb: False
+  no_checkpoint: False

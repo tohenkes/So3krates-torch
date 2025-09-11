@@ -142,7 +142,9 @@ class So3krates(torch.nn.Module):
         self.ev_embedding = embedding.EuclideanEmbedding(
             initialization_to_zeros=initialize_ev_to_zeros,
         )
-        self.avg_num_neighbors = 1. if avg_num_neighbors is None else avg_num_neighbors
+        self.avg_num_neighbors = (
+            1.0 if avg_num_neighbors is None else avg_num_neighbors
+        )
 
         self.radial_embedding = radial_basis.ComputeRBF(
             r_max=r_max,
@@ -591,9 +593,7 @@ class SO3LR(So3krates):
             "partial_charges": (
                 partial_charges if self.electrostatic_energy_bool else None
             ),
-            "dipole": (
-                dipole if self.electrostatic_energy_bool else None
-            ),
+            "dipole": (dipole if self.electrostatic_energy_bool else None),
             "hirshfeld_ratios": (
                 hirshfeld_ratios if self.dispersion_energy_bool else None
             ),

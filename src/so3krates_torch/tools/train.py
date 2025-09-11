@@ -158,7 +158,8 @@ def train(
     max_num_epochs: int,
     patience: int,
     checkpoint_handler: CheckpointHandler,
-    logger: MetricsLogger,
+    logger_train: MetricsLogger,
+    logger_valid: MetricsLogger,
     eval_interval: int,
     output_args: Dict[str, bool],
     device: torch.device,
@@ -205,7 +206,7 @@ def train(
         valid_err_log(
             valid_loss_head,
             eval_metrics,
-            logger,
+            logger_valid,
             log_errors,
             None,
             valid_loader_name,
@@ -218,9 +219,18 @@ def train(
         # LR scheduler and SWA update
         if swa is None or epoch < swa.start:
             if epoch > start_epoch:
-                lr_scheduler.step(
-                    metrics=valid_loss
-                )  # Can break if exponential LR, TODO fix that!
+                # Handle different scheduler types
+                step_method = lr_scheduler.step
+                has_metrics = (
+                    hasattr(step_method, "__code__")
+                    and "metrics" in step_method.__code__.co_varnames
+                )
+                if has_metrics:
+                    # ReduceLROnPlateau scheduler needs metrics
+                    lr_scheduler.step(metrics=valid_loss)
+                else:
+                    # ExponentialLR and other schedulers don't need metrics
+                    lr_scheduler.step()
         else:
             if swa_start:
                 logging.info("Changing loss based on Stage Two Weights")
@@ -246,7 +256,7 @@ def train(
             output_args=output_args,
             max_grad_norm=max_grad_norm,
             ema=ema,
-            logger=logger,
+            logger=logger_train,
             device=device,
             distributed=distributed,
             distributed_model=distributed_model,
@@ -279,7 +289,7 @@ def train(
                         valid_err_log(
                             valid_loss_head,
                             eval_metrics,
-                            logger,
+                            logger_valid,
                             log_errors,
                             epoch,
                             valid_loader_name,
@@ -426,7 +436,7 @@ def take_step(
             training=True,
             compute_force=output_args["forces"],
             compute_virials=output_args["virials"],
-            compute_stress=output_args["stress"]
+            compute_stress=output_args["stress"],
         )
         loss = loss_fn(pred=output, ref=batch)
         loss.backward()
@@ -584,4 +594,3 @@ def evaluate(
         param.requires_grad = True
 
     return avg_loss, aux
-

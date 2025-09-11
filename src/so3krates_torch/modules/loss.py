@@ -4,7 +4,7 @@ from mace.modules.loss import (
     weighted_mean_squared_error_energy,
     mean_squared_error_forces,
     weighted_mean_squared_error_dipole,
-    reduce_loss
+    reduce_loss,
 )
 from torch_geometric.data import Batch
 
@@ -31,10 +31,7 @@ def weighted_mean_squared_error_hirshfeld(
 
 class WeightedEnergyForcesDipoleLoss(torch.nn.Module):
     def __init__(
-        self, 
-        energy_weight=1.0, 
-        forces_weight=1.0,
-        dipole_weight=1.0
+        self, energy_weight=1.0, forces_weight=1.0, dipole_weight=1.0
     ) -> None:
         super().__init__()
         self.register_buffer(
@@ -57,7 +54,8 @@ class WeightedEnergyForcesDipoleLoss(torch.nn.Module):
         loss_forces = mean_squared_error_forces(ref, pred, ddp)
         loss_dipole = weighted_mean_squared_error_dipole(ref, pred, ddp)
         return (
-            self.energy_weight * loss_energy + self.forces_weight * loss_forces
+            self.energy_weight * loss_energy
+            + self.forces_weight * loss_forces
             + self.dipole_weight * loss_dipole
         )
 
@@ -71,10 +69,7 @@ class WeightedEnergyForcesDipoleLoss(torch.nn.Module):
 
 class WeightedEnergyForcesHirshfeldLoss(torch.nn.Module):
     def __init__(
-        self, 
-        energy_weight=1.0, 
-        forces_weight=1.0,
-        hirshfeld_weight=1.0
+        self, energy_weight=1.0, forces_weight=1.0, hirshfeld_weight=1.0
     ) -> None:
         super().__init__()
         self.register_buffer(
@@ -97,7 +92,8 @@ class WeightedEnergyForcesHirshfeldLoss(torch.nn.Module):
         loss_forces = mean_squared_error_forces(ref, pred, ddp)
         loss_hirshfeld = weighted_mean_squared_error_hirshfeld(ref, pred, ddp)
         return (
-            self.energy_weight * loss_energy + self.forces_weight * loss_forces
+            self.energy_weight * loss_energy
+            + self.forces_weight * loss_forces
             + self.hirshfeld_weight * loss_hirshfeld
         )
 
@@ -111,11 +107,11 @@ class WeightedEnergyForcesHirshfeldLoss(torch.nn.Module):
 
 class WeightedEnergyForcesDipoleHirshfeldLoss(torch.nn.Module):
     def __init__(
-        self, 
-        energy_weight=1.0, 
+        self,
+        energy_weight=1.0,
         forces_weight=1.0,
         dipole_weight=1.0,
-        hirshfeld_weight=1.0
+        hirshfeld_weight=1.0,
     ) -> None:
         super().__init__()
         self.register_buffer(
@@ -143,7 +139,8 @@ class WeightedEnergyForcesDipoleHirshfeldLoss(torch.nn.Module):
         loss_dipole = weighted_mean_squared_error_dipole(ref, pred, ddp)
         loss_hirshfeld = weighted_mean_squared_error_hirshfeld(ref, pred, ddp)
         return (
-            self.energy_weight * loss_energy + self.forces_weight * loss_forces
+            self.energy_weight * loss_energy
+            + self.forces_weight * loss_forces
             + self.dipole_weight * loss_dipole
             + self.hirshfeld_weight * loss_hirshfeld
         )
