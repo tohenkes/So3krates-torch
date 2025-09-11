@@ -18,6 +18,7 @@ from mace.tools.utils import MetricsLogger, setup_logger
 from mace.tools.checkpoint import CheckpointHandler, CheckpointState
 from torch_ema import ExponentialMovingAverage
 from so3krates_torch.tools.train import train
+from so3krates_torch.tools.finetune import freeze_model_parameters
 import os
 
 
@@ -533,6 +534,38 @@ def load_checkpoint_if_exists(
         return 0
 
 
+def setup_finetuning(config: dict, model: torch.nn.Module) -> None:
+
+    # check that a pre-trained model is provided
+    pretrained_model_given = (
+        config["TRAINING"].get("pretrained_weights") is not None
+        or config["TRAINING"].get("pretrained_model") is not None
+    )
+    assert pretrained_model_given, (
+        "Finetuning requires a pretrained model. "
+        "Please provide 'pretrained_weights' or 'pretrained_model' in the config."
+    )
+
+    choice = config["TRAINING"].get("finetune_choice", None)
+    if choice is not None:
+        logging.info(f"Setting up finetuning with choice: {choice}")
+        # freeze ALL model params:
+        freeze_model_parameters(
+            model,
+            choice,
+        )
+        # log number of trainable params, absolute and percentage
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(
+            p.numel() for p in model.parameters() if p.requires_grad
+        )
+        logging.info(f"Total model parameters: {total_params}")
+        logging.info(f"Trainable model parameters: {trainable_params}")
+        logging.info(
+            f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train SO3LR model")
     parser.add_argument(
@@ -548,7 +581,7 @@ def main():
 
     # Setup logging
     setup_logging(config)
-    
+
     # Get pretrained model settings from config
     pretrained_weights = config["TRAINING"].get("pretrained_weights", None)
     pretrained_model = config["TRAINING"].get("pretrained_model", None)
@@ -587,6 +620,9 @@ def main():
         # Load pretrained weights if specified
         if pretrained_weights:
             load_pretrained_weights(model, pretrained_weights, device)
+
+    # Setup finetuning if specified
+    setup_finetuning(config, model)
 
     # Setup data loaders
     train_loader, valid_loaders = setup_data_loaders(config, model)
@@ -652,8 +688,8 @@ def main():
         max_num_epochs=max_num_epochs,
         patience=patience,
         checkpoint_handler=checkpoint_handler,
-        logger_train=logger['train'],
-        logger_valid=logger['valid'],
+        logger_train=logger["train"],
+        logger_valid=logger["valid"],
         eval_interval=eval_interval,
         output_args=output_args,
         device=device,
@@ -669,11 +705,11 @@ def main():
         rank=0,
     )
     logging.info("Training completed successfully!")
-    
+
     # save the model in the working directory
     final_model_path = f'{config["GENERAL"]["name_exp"]}.pth'
     torch.save(model.state_dict(), final_model_path)
-    torch.save(model, final_model_path.replace('.pth', '.model'))
+    torch.save(model, final_model_path.replace(".pth", ".model"))
 
 
 if __name__ == "__main__":

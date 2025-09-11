@@ -33,6 +33,7 @@ from mace.tools.utils import (
     MetricsLogger,
 )
 from so3krates_torch.tools.eval import ModelEval
+from so3krates_torch.tools.finetune import preserve_grad_state
 
 
 @dataclasses.dataclass
@@ -568,29 +569,25 @@ def evaluate(
     output_args: Dict[str, bool],
     device: torch.device,
 ) -> Tuple[float, Dict[str, Any]]:
-    for param in model.parameters():
-        param.requires_grad = False
 
     metrics = ModelEval(loss_fn=loss_fn).to(device)
 
-    start_time = time.time()
-    for batch in data_loader:
-        batch = batch.to(device)
-        batch_dict = batch.to_dict()
-        output = model(
-            batch_dict,
-            training=False,
-            compute_force=output_args["forces"],
-            compute_virials=output_args["virials"],
-            compute_stress=output_args["stress"],
-        )
-        avg_loss, aux = metrics(batch, output)
+    with preserve_grad_state(model):
+        start_time = time.time()
+        for batch in data_loader:
+            batch = batch.to(device)
+            batch_dict = batch.to_dict()
+            output = model(
+                batch_dict,
+                training=False,
+                compute_force=output_args["forces"],
+                compute_virials=output_args["virials"],
+                compute_stress=output_args["stress"],
+            )
+            avg_loss, aux = metrics(batch, output)
 
     avg_loss, aux = metrics.compute()
     aux["time"] = time.time() - start_time
     metrics.reset()
-
-    for param in model.parameters():
-        param.requires_grad = True
 
     return avg_loss, aux
