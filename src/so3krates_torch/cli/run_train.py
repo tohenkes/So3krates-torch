@@ -535,7 +535,6 @@ def load_checkpoint_if_exists(
 
 
 def setup_finetuning(config: dict, model: torch.nn.Module) -> None:
-
     # check that a pre-trained model is provided
     pretrained_model_given = (
         config["TRAINING"].get("pretrained_weights") is not None
@@ -549,11 +548,11 @@ def setup_finetuning(config: dict, model: torch.nn.Module) -> None:
     choice = config["TRAINING"].get("finetune_choice", None)
     if choice is not None:
         logging.info(f"Setting up finetuning with choice: {choice}")
-        # freeze ALL model params:
-        freeze_model_parameters(
-            model,
-            choice,
-        )
+        if choice != "naive":
+            freeze_model_parameters(
+                model,
+                choice,
+            )
         # log number of trainable params, absolute and percentage
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(
