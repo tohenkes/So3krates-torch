@@ -729,7 +729,7 @@ def test_ensemble(
         atoms_list=data_to_use,
         batch_size=batch_size,
         r_max=reference_model.r_max,
-        r_max_lr=r_max_lr,
+        r_max_lr=10e5 if r_max_lr is None else r_max_lr,
         key_specification=keyspec,
         shuffle=False,
         drop_last=False,
