@@ -294,23 +294,25 @@ class EuclideanAttentionBlock(torch.nn.Module):
         self.inv_heads = num_heads
         self.inv_head_dim = features_dim // num_heads
         self.W_q_inv = torch.nn.Parameter(
-            torch.empty(self.inv_heads, self.inv_head_dim, self.inv_head_dim)
+            torch.empty(
+                self.inv_heads, self.inv_head_dim, self.inv_head_dim, device=device
+            )
         )
         self.W_k_inv = torch.nn.Parameter(
-            torch.empty(self.inv_heads, self.inv_head_dim, self.inv_head_dim)
+            torch.empty(self.inv_heads, self.inv_head_dim, self.inv_head_dim, device=device)
         )
         self.W_v_inv = torch.nn.Parameter(
-            torch.empty(self.inv_heads, self.inv_head_dim, self.inv_head_dim)
+            torch.empty(self.inv_heads, self.inv_head_dim, self.inv_head_dim, device=device)
         )
         # query, key weights for ev features
         # no value weights, as it uses spherical harmonics as values
         self.ev_heads = len(degrees)
         self.ev_head_dim = features_dim // len(degrees)
         self.W_q_ev = torch.nn.Parameter(
-            torch.empty(self.ev_heads, self.ev_head_dim, self.ev_head_dim)
+            torch.empty(self.ev_heads, self.ev_head_dim, self.ev_head_dim, device=device)
         )
         self.W_k_ev = torch.nn.Parameter(
-            torch.empty(self.ev_heads, self.ev_head_dim, self.ev_head_dim)
+            torch.empty(self.ev_heads, self.ev_head_dim, self.ev_head_dim, device=device)
         )
         # initialize the weights
         sqrt_5 = math.sqrt(5)
