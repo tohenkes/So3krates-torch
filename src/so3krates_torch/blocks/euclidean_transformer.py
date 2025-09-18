@@ -285,7 +285,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             torch.tensor([2 * y + 1 for y in degrees])
         ).item()
         self.inv_features_dim = features_dim
-        self.so3_conv_invariants = L0Contraction(degrees=degrees)
+        self.so3_conv_invariants = L0Contraction(degrees=degrees, device=device)
 
         self.filter_net_inv = filter_net_inv
         self.filter_net_ev = filter_net_ev
@@ -495,7 +495,7 @@ class InteractionBlock(torch.nn.Module):
             out_features=features_dim + len_degrees,
             bias=bias,
         )
-        self.so3_conv_invariants = L0Contraction(degrees=degrees)
+        self.so3_conv_invariants = L0Contraction(degrees=degrees, device=device)
         # repeat the b_ev_features for each degree
         # e.g. for degrees=[0,1,2], we have repeats = [1, 3, 5]
         self.degree_repeats = torch.tensor(
