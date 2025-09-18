@@ -536,17 +536,16 @@ def load_checkpoint_if_exists(
 
 def setup_finetuning(config: dict, model: torch.nn.Module, device_name: str) -> None:
     # check that a pre-trained model is provided
-    pretrained_model_given = (
-        config["TRAINING"].get("pretrained_weights") is not None
-        or config["TRAINING"].get("pretrained_model") is not None
-    )
-    assert pretrained_model_given, (
-        "Finetuning requires a pretrained model. "
-        "Please provide 'pretrained_weights' or 'pretrained_model' in the config."
-    )
-
     choice = config["TRAINING"].get("finetune_choice", None)
     if choice is not None:
+        pretrained_model_given = (
+            config["TRAINING"].get("pretrained_weights") is not None
+            or config["TRAINING"].get("pretrained_model") is not None
+        )
+        assert pretrained_model_given, (
+            "Finetuning requires a pretrained model. "
+            "Please provide 'pretrained_weights' or 'pretrained_model' in the config."
+        )
         logging.info(f"Setting up finetuning with choice: {choice}")
         
         if choice == "lora":
