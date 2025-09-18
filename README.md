@@ -27,8 +27,8 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 
 
 ## TODO
+- [ ] multi head training (look at MACE)
 - [ ] test loading/training hirshfeld ratios, partial charges
-- [ ] finetuning
 - [ ] enable torch.script (important for openmm)
 
 

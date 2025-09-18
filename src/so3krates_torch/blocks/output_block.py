@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 from so3krates_torch.tools import scatter
 from typing import Callable, Dict, Optional
 
@@ -115,6 +116,101 @@ class AtomicEnergyOutputHead(nn.Module):
             atomic_energies += self.energy_shifts[atomic_indices].unsqueeze(1)
 
         return atomic_energies
+
+
+class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
+    def __init__(
+        self,
+        num_output_heads: int,
+        features_dim: int,
+        energy_regression_dim: Optional[int] = None,
+        final_output_features: int = 1,
+        layers: int = 2,
+        bias: bool = True,
+        use_non_linearity: bool = True,
+        non_linearity: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        final_non_linearity: bool = False,
+        atomic_type_shifts: Optional[Dict[str, float]] = None,
+        learn_atomic_type_shifts: bool = False,
+        learn_atomic_type_scales: bool = False,
+        num_elements: Optional[int] = None,
+    ):
+        super().__init__(
+            features_dim=features_dim,
+            energy_regression_dim=energy_regression_dim,
+            final_output_features=final_output_features,
+            layers=layers,
+            bias=bias,
+            use_non_linearity=use_non_linearity,
+            non_linearity=non_linearity,
+            final_non_linearity=final_non_linearity,
+            atomic_type_shifts=atomic_type_shifts,
+            learn_atomic_type_shifts=learn_atomic_type_shifts,
+            learn_atomic_type_scales=learn_atomic_type_scales,
+            num_elements=num_elements,
+        )
+        self.num_output_heads = num_output_heads
+
+        self.layers_weights = nn.ParameterList()
+        self.layers_bias = nn.ParameterList()
+        for _ in range(layers - 1):
+            multi_head_weights = nn.Parameter(
+                torch.empty(self.num_output_heads, features_dim, energy_regression_dim)
+            )
+            multi_head_bias = nn.Parameter(
+                torch.empty(self.num_output_heads, energy_regression_dim)
+            )
+            nn.init.kaiming_uniform_(multi_head_weights, a=math.sqrt(5))
+            nn.init.zeros_(multi_head_bias)
+            self.layers_weights.append(multi_head_weights)
+            self.layers_bias.append(multi_head_bias)
+        
+        multi_head_final_weights = nn.Parameter(
+            torch.empty(self.num_output_heads, energy_regression_dim, final_output_features)
+        )
+        multi_head_final_bias = nn.Parameter(
+            torch.empty(self.num_output_heads, final_output_features)
+        )
+        nn.init.kaiming_uniform_(multi_head_final_weights, a=math.sqrt(5))
+        nn.init.zeros_(multi_head_final_bias)
+        self.final_layer_weights = multi_head_final_weights
+        self.final_layer_bias = multi_head_final_bias
+
+    def forward(
+        self,
+        inv_features: torch.Tensor,
+        data: Dict[str, torch.Tensor],
+        atomic_numbers: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+
+        for layer_weights, layer_bias in zip(self.layers_weights, self.layers_bias):
+            # inv_features shape: (num_nodes, features_dim)
+            # layer_weights shape: (num_heads, features_dim, energy_regression_dim)
+            # layer_bias shape: (num_heads, energy_regression_dim)
+            inv_features = torch.einsum(
+                "nf, hfd -> nhd", inv_features, layer_weights
+                ) + layer_bias.unsqueeze(0)
+            if self.use_non_linearity:
+                inv_features = self.non_linearity(inv_features)
+        
+        atomic_energies = torch.einsum(
+            "nhd, hdf -> nhf", inv_features, self.final_layer_weights
+            ) + self.final_layer_bias.unsqueeze(0)
+        if self.final_non_linearity:
+            atomic_energies = self.non_linearity(atomic_energies)
+        
+        if self.learn_atomic_type_shifts:
+            atomic_energies += self.energy_shifts(data["node_attrs"]).unsqueeze(0)
+        if self.learn_atomic_type_scales:
+            atomic_energies *= self.energy_scales(data["node_attrs"]).unsqueeze(0)
+        
+        if self.use_defined_shifts:
+            assert (
+                atomic_numbers is not None
+            ), "If use_defined_shifts is True, atomic_numbers must be provided."
+            atomic_indices = atomic_numbers - 1
+            atomic_energies += self.energy_shifts[atomic_indices].unsqueeze(0).unsqueeze(2)
+        return atomic_energies.squeeze(0)  # shape: (num_nodes, num_heads, final_output_features)
 
 
 class PartialChargesOutputHead(nn.Module):

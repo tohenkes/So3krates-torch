@@ -15,6 +15,7 @@ from so3krates_torch.data.atomic_data import AtomicData as So3Data
 from mace.tools import torch_geometric, torch_tools, utils
 from mace import data
 from mace.data.utils import KeySpecification
+import importlib.resources as resources
 
 
 def get_model_dtype(model: torch.nn.Module) -> torch.dtype:
@@ -412,9 +413,6 @@ class TorchkratesCalculator(Calculator):
                 "invariant_features": invariants,
                 "equivariant_features": equivariants,
             }
-
-
-import importlib.resources as resources
 
 
 class SO3LRCalculator(TorchkratesCalculator):

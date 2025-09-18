@@ -18,7 +18,7 @@ from mace.tools.utils import MetricsLogger, setup_logger
 from mace.tools.checkpoint import CheckpointHandler, CheckpointState
 from torch_ema import ExponentialMovingAverage
 from so3krates_torch.tools.train import train
-from so3krates_torch.tools.finetune import freeze_model_parameters
+from so3krates_torch.tools.finetune import freeze_model_parameters, model_to_lora, fuse_lora_weights
 import os
 
 
@@ -304,7 +304,7 @@ def setup_optimizer_and_scheduler(
             model.parameters(),
             lr=lr,
             weight_decay=weight_decay,
-            amsgrad=train_config.get("amsgrad", True),
+            amsgrad=train_config.get("amsgrad", False),
         )
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
@@ -534,7 +534,7 @@ def load_checkpoint_if_exists(
         return 0
 
 
-def setup_finetuning(config: dict, model: torch.nn.Module) -> None:
+def setup_finetuning(config: dict, model: torch.nn.Module, device: torch.device) -> None:
     # check that a pre-trained model is provided
     pretrained_model_given = (
         config["TRAINING"].get("pretrained_weights") is not None
@@ -548,6 +548,16 @@ def setup_finetuning(config: dict, model: torch.nn.Module) -> None:
     choice = config["TRAINING"].get("finetune_choice", None)
     if choice is not None:
         logging.info(f"Setting up finetuning with choice: {choice}")
+        
+        if choice == "lora":
+            model = model_to_lora(
+                model,
+                rank=config["TRAINING"].get("lora_rank", 4),
+                alpha=config["TRAINING"].get("lora_alpha", 8.0),
+                device=device,
+            )
+            logging.info("Converted model to LoRA format")
+        
         if choice != "naive":
             freeze_model_parameters(
                 model,
@@ -601,7 +611,7 @@ def main():
 
     # Setup device
     device_name = config["MISC"].get("device", "cuda")
-    device = torch.device(device_name if torch.cuda.is_available() else "cpu")
+    device = torch.device(device_name)
     logging.info(f"Using device: {device}")
 
     # Handle model creation and pretrained loading
@@ -621,7 +631,7 @@ def main():
             load_pretrained_weights(model, pretrained_weights, device)
 
     # Setup finetuning if specified
-    setup_finetuning(config, model)
+    setup_finetuning(config, model, device)
 
     # Setup data loaders
     train_loader, valid_loaders = setup_data_loaders(config, model)
@@ -674,7 +684,6 @@ def main():
     log_errors = config["MISC"].get("error_table", "PerAtomMAE")
 
     logging.info("Starting training loop...")
-
     # Start training
     train(
         model=model,
@@ -705,6 +714,14 @@ def main():
     )
     logging.info("Training completed successfully!")
 
+    # TODO: fuse model weights if using LoRA before saving
+    if config["TRAINING"].get("finetune_choice", None) == "lora":
+        logging.info("Fusing LoRA weights into base model for saving...")
+        model = fuse_lora_weights(model)
+        logging.info("LoRA weights fused successfully.")
+    # TODO: use EMA weights if enabled before saving
+
+    
     # save the model in the working directory
     final_model_path = f'{config["GENERAL"]["name_exp"]}.pth'
     torch.save(model.state_dict(), final_model_path)

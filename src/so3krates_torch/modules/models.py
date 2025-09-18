@@ -9,11 +9,11 @@ from so3krates_torch.blocks import (
 )
 from so3krates_torch.blocks.output_block import (
     AtomicEnergyOutputHead,
+    MultiAtomicEnergyOutputHead,
     PartialChargesOutputHead,
     DipoleVecOutputHead,
     HirshfeldOutputHead,
 )
-from mace.modules.utils import get_outputs
 from so3krates_torch.blocks import radial_basis
 import math
 from so3krates_torch.blocks.physical_potentials import (
@@ -38,7 +38,7 @@ class So3krates(torch.nn.Module):
         avg_num_neighbors: Optional[float] = None,
         final_mlp_layers: int = 2,
         energy_regression_dim: Optional[int] = None,
-        message_normalization: str = "sqrt_num_features",
+        message_normalization: str = "avg_num_neighbors",
         initialize_ev_to_zeros: bool = True,
         radial_basis_fn: str = "gaussian",
         trainable_rbf: bool = False,
@@ -96,13 +96,23 @@ class So3krates(torch.nn.Module):
         )
 
         torch.manual_seed(seed)
+        
+        self.energy_regression_dim = energy_regression_dim
+        self.features_dim = features_dim
+        self.final_mlp_layers = final_mlp_layers
+        self.atomic_type_shifts = atomic_type_shifts
+        self.learn_atomic_type_shifts = learn_atomic_type_shifts
+        self.learn_atomic_type_scales = learn_atomic_type_scales
+        self.num_elements = num_elements
+        self.degrees = degrees
+        
         if cutoff_fn == "polynomial":
             self.cutoff_fn = cutoff_fn_dict[cutoff_fn](r_max, p=cutoff_p)
         else:
             self.cutoff_fn = cutoff_fn_dict[cutoff_fn](r_max)
 
         self.spherical_harmonics = RealSphericalHarmonics(
-            degrees=degrees,
+            degrees=self.degrees,
         )
 
         self.activation_fn = utils.activation_fn_dict.get(
@@ -117,7 +127,7 @@ class So3krates(torch.nn.Module):
 
         self.features_dim = features_dim
         self.inv_feature_embedding = embedding.InvariantEmbedding(
-            num_elements=num_elements,
+            num_elements=self.num_elements,
             out_features=self.features_dim,
             bias=False,
         )
@@ -127,7 +137,7 @@ class So3krates(torch.nn.Module):
             self.charge_embedding = embedding.ChargeSpinEmbedding(
                 num_features=self.features_dim,
                 activation_fn=self.activation_fn,
-                num_elements=num_elements,
+                num_elements=self.num_elements,
             )
             self.num_embeddings += 1
         self.use_spin_embed = use_spin_embed
@@ -135,7 +145,7 @@ class So3krates(torch.nn.Module):
             self.spin_embedding = embedding.ChargeSpinEmbedding(
                 num_features=self.features_dim,
                 activation_fn=self.activation_fn,
-                num_elements=num_elements,
+                num_elements=self.num_elements,
             )
             self.num_embeddings += 1
         self.embedding_scale = math.sqrt(self.num_embeddings)
@@ -156,9 +166,9 @@ class So3krates(torch.nn.Module):
         self.euclidean_transformers = torch.nn.ModuleList(
             [
                 euclidean_transformer.EuclideanTransformer(
-                    degrees=degrees,
+                    degrees=self.degrees,
                     num_heads=num_att_heads,
-                    features_dim=features_dim,
+                    features_dim=self.features_dim,
                     num_radial_basis=num_radial_basis,
                     interaction_bias=interaction_bias,
                     message_normalization=message_normalization,
@@ -174,20 +184,19 @@ class So3krates(torch.nn.Module):
                 for _ in range(num_interactions)
             ]
         )
-        self.energy_regression_dim = energy_regression_dim
         self.atomic_energy_output_block = AtomicEnergyOutputHead(
-            features_dim=features_dim,
+            features_dim=self.features_dim,
             energy_regression_dim=self.energy_regression_dim,
             final_output_features=1,  # TODO: remove hardcoded value
-            layers=final_mlp_layers,
+            layers=self.final_mlp_layers,
             bias=True,
             non_linearity=self.energy_activation_fn,
             final_non_linearity=False,
             use_non_linearity=True,
-            atomic_type_shifts=atomic_type_shifts,
-            learn_atomic_type_shifts=learn_atomic_type_shifts,
-            learn_atomic_type_scales=learn_atomic_type_scales,
-            num_elements=num_elements,
+            atomic_type_shifts=self.atomic_type_shifts,
+            learn_atomic_type_shifts=self.learn_atomic_type_shifts,
+            learn_atomic_type_scales=self.learn_atomic_type_scales,
+            num_elements=self.num_elements,
         )
 
     def _get_graph(
@@ -360,7 +369,7 @@ class So3krates(torch.nn.Module):
             dim_size=data["ptr"].shape[0] - 1,
         )
 
-        forces, virials, stress, hessian, edge_forces = get_outputs(
+        forces, virials, stress, hessian, edge_forces = utils.get_outputs(
             energy=total_energy,
             positions=self.positions,
             displacement=self.displacement,
@@ -462,6 +471,50 @@ class SO3LR(So3krates):
             lr=self.use_lr,
         )
 
+    def _combine_energies(
+        self,
+        atomic_energies: torch.Tensor,
+        zbl_atomic_energies: Optional[torch.Tensor] = None,
+        electrostatic_energies: Optional[torch.Tensor] = None,
+        dispersion_energies: Optional[torch.Tensor] = None,
+    ):
+        if self.zbl_repulsion_bool and zbl_atomic_energies is not None:
+            atomic_energies += zbl_atomic_energies
+        if self.electrostatic_energy_bool and electrostatic_energies is not None:
+            atomic_energies += electrostatic_energies
+        if self.dispersion_energy_bool and dispersion_energies is not None:
+            atomic_energies += dispersion_energies
+        return atomic_energies
+
+    def _get_outputs(
+        self,
+        energy: torch.Tensor,
+        positions: torch.Tensor,
+        displacement: torch.Tensor,
+        vectors: torch.Tensor,
+        cell: Optional[torch.Tensor] = None,
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_hessian: bool = False,
+        compute_edge_forces: bool = False,
+        batch: Optional[torch.tensor] = None
+    ):
+        return utils.get_outputs(
+            energy=energy,
+            positions=positions,
+            displacement=displacement,
+            vectors=vectors,
+            cell=cell,
+            training=training,
+            compute_force=compute_force,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_hessian=compute_hessian,
+            compute_edge_forces=compute_edge_forces,
+        )
+
     def forward(
         self,
         data: Dict[str, torch.Tensor],
@@ -506,6 +559,7 @@ class SO3LR(So3krates):
             )
             self.lengths_lr = self.ctx.lengths_lr
 
+        zbl_atomic_energies = None
         if self.zbl_repulsion_bool:
             zbl_atomic_energies = self.zbl_repulsion(
                 atomic_numbers=data["atomic_numbers"],
@@ -515,8 +569,7 @@ class SO3LR(So3krates):
                 lengths=self.lengths,
                 num_nodes=inv_features.shape[0],
             )
-            atomic_energies += zbl_atomic_energies
-
+        electrostatic_energies = None
         if self.electrostatic_energy_bool:
             partial_charges = self.partial_charges_output_block(
                 inv_features=inv_features,
@@ -541,8 +594,7 @@ class SO3LR(So3krates):
                 cutoff_lr=self.r_max_lr,
                 electrostatic_energy_scale=self.electrostatic_energy_scale,
             )
-            atomic_energies += electrostatic_energies
-
+        dispersion_energies = None
         if self.dispersion_energy_bool:
             hirshfeld_ratios = self.hirshfeld_output_block(
                 inv_features=inv_features,
@@ -559,7 +611,13 @@ class SO3LR(So3krates):
                 cutoff_lr_damping=self.dispersion_energy_cutoff_lr_damping,
                 dispersion_energy_scale=self.dispersion_energy_scale,
             )
-            atomic_energies += dispersion_energies
+        
+        atomic_energies = self._combine_energies(
+            atomic_energies=atomic_energies,
+            zbl_atomic_energies=zbl_atomic_energies,
+            electrostatic_energies=electrostatic_energies,
+            dispersion_energies=dispersion_energies,
+        )
         total_energy = scatter.scatter_sum(
             src=atomic_energies,
             index=data["batch"],
@@ -567,7 +625,7 @@ class SO3LR(So3krates):
             dim_size=data["ptr"].shape[0] - 1,
         )
 
-        forces, virials, stress, hessian, edge_forces = get_outputs(
+        forces, virials, stress, hessian, edge_forces = self._get_outputs(
             energy=total_energy,
             positions=self.positions,
             displacement=self.displacement,
@@ -579,6 +637,7 @@ class SO3LR(So3krates):
             compute_stress=compute_stress,
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
+            batch=data["batch"]
         )
         return {
             "energy": total_energy,
@@ -600,3 +659,78 @@ class SO3LR(So3krates):
             "descriptors": (inv_features if return_descriptors else None),
             "att_scores": att_scores if return_att else None,
         }
+
+
+class MultiHeadSO3LR(SO3LR):
+    def __init__(
+        self,
+        num_output_heads: int = 8,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.num_output_heads = num_output_heads
+        self.atomic_energy_output_block = MultiAtomicEnergyOutputHead(
+            features_dim=self.features_dim,
+            energy_regression_dim=self.energy_regression_dim,
+            final_output_features=1,  # TODO: remove hardcoded value
+            layers=self.final_mlp_layers,
+            bias=True,
+            non_linearity=self.energy_activation_fn,
+            final_non_linearity=False,
+            use_non_linearity=True,
+            atomic_type_shifts=self.atomic_type_shifts,
+            learn_atomic_type_shifts=self.learn_atomic_type_shifts,
+            learn_atomic_type_scales=self.learn_atomic_type_scales,
+            num_elements=self.num_elements,
+            num_output_heads=self.num_output_heads,
+        )
+    
+    def _get_outputs(
+        self,
+        energy: torch.Tensor,
+        positions: torch.Tensor,
+        displacement: torch.Tensor,
+        vectors: torch.Tensor,
+        cell: Optional[torch.Tensor] = None,
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_hessian: bool = False,
+        compute_edge_forces: bool = False,
+        batch: Optional[torch.tensor] = None
+    ):
+        forces, virials, stress, hessian, edge_forces = utils.get_outputs(
+            energy=energy, 
+            positions=positions,
+            displacement=displacement,
+            vectors=vectors,
+            cell=cell,
+            training=training,
+            compute_force=compute_force,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_hessian=compute_hessian,
+            compute_edge_forces=compute_edge_forces,
+            is_multihead=True,
+            batch=batch
+        )
+        return forces, virials, stress, hessian, edge_forces
+    
+    
+    def _combine_energies(
+        self,
+        atomic_energies: torch.Tensor,
+        zbl_atomic_energies: Optional[torch.Tensor] = None,
+        electrostatic_energies: Optional[torch.Tensor] = None,
+        dispersion_energies: Optional[torch.Tensor] = None,
+    ):
+        # atomic_energies has shape (num_atoms, num_output_heads)
+        if self.zbl_repulsion_bool and zbl_atomic_energies is not None:
+            atomic_energies += zbl_atomic_energies.unsqueeze(-1)
+        if self.electrostatic_energy_bool and electrostatic_energies is not None:
+            atomic_energies += electrostatic_energies.unsqueeze(-1)
+        if self.dispersion_energy_bool and dispersion_energies is not None:
+            atomic_energies += dispersion_energies.unsqueeze(-1)
+        return atomic_energies

@@ -6,6 +6,13 @@ from mace import data as mace_data
 from mace.tools import torch_geometric, torch_tools, utils
 import h5py
 import numpy as np
+from typing import Optional, Tuple, List
+from mace.modules.utils import (
+    compute_forces,
+    compute_forces_virials,
+    compute_hessians_vmap,
+)
+from torch.func import jacrev
 
 activation_fn_dict = {
     "silu": torch.nn.SiLU,
@@ -14,6 +21,135 @@ activation_fn_dict = {
     "tanh": torch.nn.Tanh,
     "identity": torch.nn.Identity,
 }
+
+
+def compute_forces_virials(
+    energy: torch.Tensor,
+    positions: torch.Tensor,
+    displacement: torch.Tensor,
+    cell: torch.Tensor,
+    training: bool = True,
+    compute_stress: bool = False,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+    grad_outputs: List[Optional[torch.Tensor]] = [torch.ones_like(energy)]
+    forces, virials = torch.autograd.grad(
+        outputs=[energy],  # [n_graphs, ]
+        inputs=[positions, displacement],  # [n_nodes, 3]
+        grad_outputs=grad_outputs,
+        retain_graph=training,  # Make sure the graph is not destroyed during training
+        create_graph=training,  # Create graph for second derivative
+        allow_unused=True,
+    )
+    stress = torch.zeros_like(displacement)
+    if compute_stress and virials is not None:
+        cell = cell.view(-1, 3, 3)
+        volume = torch.linalg.det(cell).abs().unsqueeze(-1)
+        stress = virials / volume.view(-1, 1, 1)
+        stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
+    if forces is None:
+        forces = torch.zeros_like(positions)
+    if virials is None:
+        virials = torch.zeros((1, 3, 3))
+
+    return -1 * forces, -1 * virials, stress
+
+
+def compute_multihead_forces(energy, positions, batch, training=True):
+    num_graphs, num_heads, _ = energy.shape
+    # change shape to [num_heads,num_graphs]
+    energy_for_grad = energy.view(num_graphs, num_heads).permute(1, 0)
+    grad_outputs = torch.zeros(
+        num_heads, num_heads, num_graphs, device=energy.device, dtype=energy.dtype
+    )
+    # picks the gradient for a specific head
+    eye_for_heads = torch.eye(num_heads, device=energy.device, dtype=energy.dtype)
+    # picks the gradient for a specific graph and head
+    grad_outputs[:, :, :] = eye_for_heads.unsqueeze(-1).expand(-1, -1, num_graphs)
+
+    grad_all = torch.autograd.grad(
+        outputs=[energy_for_grad],
+        inputs=[positions],
+        grad_outputs=grad_outputs,
+        retain_graph=training,
+        create_graph=training,
+        allow_unused=True,
+        is_grads_batched=True, # treat the first dim (heads) as batch
+    )[0]
+    forces = -grad_all
+    return forces
+
+
+
+def get_outputs(
+    energy: torch.Tensor,
+    positions: torch.Tensor,
+    cell: torch.Tensor,
+    displacement: Optional[torch.Tensor],
+    vectors: Optional[torch.Tensor] = None,
+    training: bool = False,
+    compute_force: bool = True,
+    compute_virials: bool = True,
+    compute_stress: bool = True,
+    compute_hessian: bool = False,
+    compute_edge_forces: bool = False,
+    is_multihead: bool = False,
+    batch: Optional[torch.Tensor] = None,
+) -> Tuple[
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+]:
+    if (compute_virials or compute_stress) and displacement is not None:
+        forces, virials, stress = compute_forces_virials(
+            energy=energy,
+            positions=positions,
+            displacement=displacement,
+            cell=cell,
+            compute_stress=compute_stress,
+            training=(training or compute_hessian or compute_edge_forces),
+        )
+    elif compute_force:
+        if is_multihead:
+            forces, virials, stress = (
+                compute_multihead_forces(
+                    energy=energy,
+                    positions=positions,
+                    training=(training or compute_hessian or compute_edge_forces),
+                    batch=batch
+                ),
+                None,
+                None,
+            )
+        else:
+            forces, virials, stress = (
+                compute_forces(
+                    energy=energy,
+                    positions=positions,
+                    training=(training or compute_hessian or compute_edge_forces),
+                ),
+                None,
+                None,
+            )
+    else:
+        forces, virials, stress = (None, None, None)
+    if compute_hessian:
+        assert forces is not None, "Forces must be computed to get the hessian"
+        hessian = compute_hessians_vmap(forces, positions)
+    else:
+        hessian = None
+    if compute_edge_forces and vectors is not None:
+        edge_forces = compute_forces(
+            energy=energy,
+            positions=vectors,
+            training=(training or compute_hessian),
+        )
+        if edge_forces is not None:
+            edge_forces = -1 * edge_forces  # Match LAMMPS sign convention
+    else:
+        edge_forces = None
+    return forces, virials, stress, hessian, edge_forces
 
 
 def load_results_hdf5(filename, is_ensemble: bool = False):

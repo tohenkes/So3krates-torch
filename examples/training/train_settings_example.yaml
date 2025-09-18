@@ -3,7 +3,7 @@ GENERAL:
   checkpoints_dir: ./checkpoints
   model_dir: ./model
   log_dir: ./logs
-  default_dtype: float32
+  default_dtype: float64
   compute_stress: False
   seed: 100
 
@@ -46,22 +46,24 @@ TRAINING:
   weight_decay: 0.
   lr: 0.001
   optimizer: adam
+  amsgrad: True
   scheduler: exponential_decay 
-  lr_scheduler_gamma: 0.9993
-  ema: True
-  ema_decay: 0.99
-  energy_weight: 1.
+  lr_scheduler_gamma: 0.85
+  #ema: True
+  #ema_decay: 0.99
+  energy_weight: 0.
   forces_weight: 1000.
   eval_interval: 5
-  num_epochs: 150
+  num_epochs: 500
   path_to_train_data: ./md17_ethanol_small.xyz
   valid_ratio: 0.1
   clip_grad: 10.0
-  neighbors_lr_cutoff: 100.
+  neighbors_lr_cutoff: null
   patience: 50
 
+
 MISC:
-  device: cuda
+  device: cpu
   keep_checkpoints: False
   restart_latest: True 
   error_table: PerAtomMAE

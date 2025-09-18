@@ -1,5 +1,8 @@
 from contextlib import contextmanager
-
+from so3krates_torch.blocks.euclidean_transformer import (
+    EuclideanAttentionBlockLORA,
+    EuclideanAttentionBlock,
+)
 
 @contextmanager
 def preserve_grad_state(model):
@@ -22,6 +25,66 @@ def preserve_grad_state(model):
         for param, requires_grad in requires_grad_backup.items():
             param.requires_grad = requires_grad
 
+def model_to_lora(
+        model,
+        rank: int = 4,
+        alpha: int = 8,
+        device: str = "cpu",
+):
+    """
+    Convert a model to LoRA (Low-Rank Adaptation) format.
+    This function modifies the model in place, replacing the normal euclidean attention blocks
+    with their LoRA counterparts.
+    """
+    for i, transformer in enumerate(model.euclidean_transformers):
+
+        if isinstance(transformer.euclidean_attention_block, EuclideanAttentionBlock):
+            degrees = transformer.euclidean_attention_block.degrees
+            num_heads = transformer.euclidean_attention_block.num_heads
+            features_dim = transformer.euclidean_attention_block.features_dim
+            filter_net_inv = transformer.euclidean_attention_block.filter_net_inv
+            filter_net_ev = transformer.euclidean_attention_block.filter_net_ev
+            message_normalization = transformer.euclidean_attention_block.message_normalization
+            qk_non_linearity = transformer.euclidean_attention_block.qk_non_linearity
+            avg_num_neighbors = transformer.euclidean_attention_block.avg_num_neighbors
+
+
+            # Create a new LoRA attention block with the same parameters
+            lora_attention_block = EuclideanAttentionBlockLORA(
+                degrees=degrees,
+                num_heads=num_heads,
+                features_dim=features_dim,
+                filter_net_inv=filter_net_inv,
+                filter_net_ev=filter_net_ev,
+                lora_rank=rank,
+                lora_alpha=alpha,
+                message_normalization=message_normalization,
+                qk_non_linearity=qk_non_linearity,
+                avg_num_neighbors=avg_num_neighbors,
+                device=device
+            )
+
+            # Copy weights from the original attention block to the LoRA block
+            lora_attention_block.load_state_dict(
+                transformer.euclidean_attention_block.state_dict(),
+                strict=False,  # Allow missing keys for LoRA-specific parameters
+            )
+
+            # Replace the original attention block with the LoRA version
+            transformer.euclidean_attention_block = lora_attention_block
+
+    return model
+
+def fuse_lora_weights(model):
+    """
+    Fuse the LoRA weights into the main model weights.
+    This function modifies the model in place, combining the LoRA weights with the original weights.
+    """
+    for transformer in model.euclidean_transformers:
+        if isinstance(transformer.euclidean_attention_block, EuclideanAttentionBlockLORA):
+            transformer.euclidean_attention_block.fuse_lora_weights()
+    return model
+
 
 def freeze_model_parameters(
     model,
@@ -33,7 +96,7 @@ def freeze_model_parameters(
     freeze_hirshfeld: bool = True,
     freeze_embedding: bool = True,
 ):
-    possible_choices = ["last_layer", "mlp", "qkv"]
+    possible_choices = ["last_layer", "mlp", "qkv", "lora"]
     if keep_trainable_choice not in possible_choices:
         raise ValueError(
             f"Invalid choice '{keep_trainable_choice}'. Must be one of {possible_choices}."
@@ -41,9 +104,10 @@ def freeze_model_parameters(
 
     keep_trainable = []
 
-    # Always keep output heads trainable (energy, forces, etc.)
-    keep_trainable.append("atomic_energy_output_block.layers")
-    keep_trainable.append("atomic_energy_output_block.final_layer")
+    # keep output heads trainable (energy, forces, etc.) if not lora
+    if keep_trainable_choice != "lora":
+        keep_trainable.append("atomic_energy_output_block.layers")
+        keep_trainable.append("atomic_energy_output_block.final_layer")
 
     # Determine which transformer layers to keep trainable based on choice
     num_layers = len(model.euclidean_transformers)
@@ -62,6 +126,12 @@ def freeze_model_parameters(
         for i in range(num_layers):
             keep_trainable.append(
                 f"euclidean_transformers.{i}.euclidean_attention_block"
+            )
+    elif keep_trainable_choice == "lora":
+        # Keep only the LoRA parameters trainable
+        for i in range(num_layers):
+            keep_trainable.append(
+                f"euclidean_transformers.{i}.euclidean_attention_block.lora_"
             )
 
     # Handle optional components based on freeze flags
