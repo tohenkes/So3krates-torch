@@ -59,6 +59,12 @@ def main():
         default="float32",
         help="Data type to use for the model parameters",
     )
+    argparser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="Device to use for the model (e.g., 'cpu' or 'cuda')",
+    )
 
     args = argparser.parse_args()
 
@@ -78,6 +84,7 @@ def main():
         use_defined_shifts=args.use_defined_shifts,
         trainable_rbf=args.trainable_rbf,
         save_torch_settings=args.save_settings_path,
+        device=args.device
     )
 
     if args.save_state_dict_path is not None:
