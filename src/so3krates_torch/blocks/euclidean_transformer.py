@@ -567,47 +567,57 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
         self.scaling = self.alpha / self.rank
         # LoRA for query weights
         self.lora_A_q_inv = torch.nn.Parameter(
-            torch.randn(self.inv_heads, self.inv_head_dim, lora_rank)
+            torch.randn(
+                self.inv_heads,
+                self.inv_head_dim, 
+                lora_rank,
+                device=device
+        )
             * 0.01
         )
         self.lora_B_q_inv = torch.nn.Parameter(
-            torch.zeros(self.inv_heads, lora_rank, self.inv_head_dim)
-
+            torch.zeros(
+                self.inv_heads, lora_rank, self.inv_head_dim, device=device
+            )
         )
         # LoRA for key weights
         self.lora_A_k_inv = torch.nn.Parameter(
-            torch.randn(self.inv_heads, self.inv_head_dim, lora_rank)
-            * 0.01
+            torch.randn(
+                self.inv_heads,
+                self.inv_head_dim,
+                lora_rank,
+                device=device
+            ) * 0.01
         )
         self.lora_B_k_inv = torch.nn.Parameter(
-            torch.zeros(self.inv_heads, lora_rank, self.inv_head_dim)
+            torch.zeros(self.inv_heads, lora_rank, self.inv_head_dim, device=device)
         )
         
         # LoRA for value weights
         self.lora_A_v_inv = torch.nn.Parameter(
-            torch.randn(self.inv_heads, self.inv_head_dim, lora_rank)
+            torch.randn(self.inv_heads, self.inv_head_dim, lora_rank, device=device)
             * 0.01
         )
         self.lora_B_v_inv = torch.nn.Parameter(
-            torch.zeros(self.inv_heads, lora_rank, self.inv_head_dim)
+            torch.zeros(self.inv_heads, lora_rank, self.inv_head_dim, device=device)
         )
 
         # LoRA for ev features
         # LoRA for query weights
         self.lora_A_q_ev = torch.nn.Parameter(
-            torch.randn(self.ev_heads, self.ev_head_dim, lora_rank)
+            torch.randn(self.ev_heads, self.ev_head_dim, lora_rank, device=device)
             * 0.01
         )
         self.lora_B_q_ev = torch.nn.Parameter(
-            torch.zeros(self.ev_heads, lora_rank, self.ev_head_dim)
+            torch.zeros(self.ev_heads, lora_rank, self.ev_head_dim, device=device)
         )
         # LoRA for key weights
         self.lora_A_k_ev = torch.nn.Parameter(
-            torch.randn(self.ev_heads, self.ev_head_dim, lora_rank)
+            torch.randn(self.ev_heads, self.ev_head_dim, lora_rank, device=device)
             * 0.01
         )
         self.lora_B_k_ev = torch.nn.Parameter(
-            torch.zeros(self.ev_heads, lora_rank, self.ev_head_dim)
+            torch.zeros(self.ev_heads, lora_rank, self.ev_head_dim, device=device)
         )
         # No LoRA for value weights, as it uses spherical harmonics as values
 
