@@ -54,7 +54,7 @@ def main():
         "--r_max_lr",
         type=float,
         help="Max radius for long-range potentials",
-        default=12.0,
+        default=None,
     )
     parser.add_argument(
         "--dispersion_energy_cutoff_lr_damping",
