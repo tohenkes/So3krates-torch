@@ -534,7 +534,7 @@ def load_checkpoint_if_exists(
         return 0
 
 
-def setup_finetuning(config: dict, model: torch.nn.Module, device: torch.device) -> None:
+def setup_finetuning(config: dict, model: torch.nn.Module, device_name: str) -> None:
     # check that a pre-trained model is provided
     pretrained_model_given = (
         config["TRAINING"].get("pretrained_weights") is not None
@@ -554,7 +554,7 @@ def setup_finetuning(config: dict, model: torch.nn.Module, device: torch.device)
                 model,
                 rank=config["TRAINING"].get("lora_rank", 4),
                 alpha=config["TRAINING"].get("lora_alpha", 8.0),
-                device=device,
+                device=device_name,
             )
             logging.info("Converted model to LoRA format")
         
@@ -631,7 +631,7 @@ def main():
             load_pretrained_weights(model, pretrained_weights, device)
 
     # Setup finetuning if specified
-    setup_finetuning(config, model, device)
+    setup_finetuning(config, model, device_name)
 
     # Setup data loaders
     train_loader, valid_loaders = setup_data_loaders(config, model)
