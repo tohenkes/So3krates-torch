@@ -45,7 +45,9 @@ def compute_forces_virials(
         cell = cell.view(-1, 3, 3)
         volume = torch.linalg.det(cell).abs().unsqueeze(-1)
         stress = virials / volume.view(-1, 1, 1)
-        stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
+        stress = torch.where(
+            torch.abs(stress) < 1e10, stress, torch.zeros_like(stress)
+        )
     if forces is None:
         forces = torch.zeros_like(positions)
     if virials is None:
@@ -59,12 +61,20 @@ def compute_multihead_forces(energy, positions, batch, training=True):
     # change shape to [num_heads,num_graphs]
     energy_for_grad = energy.view(num_graphs, num_heads).permute(1, 0)
     grad_outputs = torch.zeros(
-        num_heads, num_heads, num_graphs, device=energy.device, dtype=energy.dtype
+        num_heads,
+        num_heads,
+        num_graphs,
+        device=energy.device,
+        dtype=energy.dtype,
     )
     # picks the gradient for a specific head
-    eye_for_heads = torch.eye(num_heads, device=energy.device, dtype=energy.dtype)
+    eye_for_heads = torch.eye(
+        num_heads, device=energy.device, dtype=energy.dtype
+    )
     # picks the gradient for a specific graph and head
-    grad_outputs[:, :, :] = eye_for_heads.unsqueeze(-1).expand(-1, -1, num_graphs)
+    grad_outputs[:, :, :] = eye_for_heads.unsqueeze(-1).expand(
+        -1, -1, num_graphs
+    )
 
     grad_all = torch.autograd.grad(
         outputs=[energy_for_grad],
@@ -73,11 +83,10 @@ def compute_multihead_forces(energy, positions, batch, training=True):
         retain_graph=training,
         create_graph=training,
         allow_unused=True,
-        is_grads_batched=True, # treat the first dim (heads) as batch
+        is_grads_batched=True,  # treat the first dim (heads) as batch
     )[0]
     forces = -grad_all
     return forces
-
 
 
 def get_outputs(
@@ -116,8 +125,10 @@ def get_outputs(
                 compute_multihead_forces(
                     energy=energy,
                     positions=positions,
-                    training=(training or compute_hessian or compute_edge_forces),
-                    batch=batch
+                    training=(
+                        training or compute_hessian or compute_edge_forces
+                    ),
+                    batch=batch,
                 ),
                 None,
                 None,
@@ -127,7 +138,9 @@ def get_outputs(
                 compute_forces(
                     energy=energy,
                     positions=positions,
-                    training=(training or compute_hessian or compute_edge_forces),
+                    training=(
+                        training or compute_hessian or compute_edge_forces
+                    ),
                 ),
                 None,
                 None,

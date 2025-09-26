@@ -84,7 +84,7 @@ def main():
         use_defined_shifts=args.use_defined_shifts,
         trainable_rbf=args.trainable_rbf,
         save_torch_settings=args.save_settings_path,
-        device=args.device
+        device=args.device,
     )
 
     if args.save_state_dict_path is not None:

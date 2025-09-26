@@ -442,7 +442,7 @@ class ModelEval(Metric):
 
         if output.get("energy") is not None and batch.energy is not None:
             self.E_computed += 1.0
-            self.delta_es.append(batch.energy - output["energy"])
+            self.delta_es.append(batch.energy - output["energy"].squeeze())
             self.delta_es_per_atom.append(
                 (batch.energy - output["energy"])
                 / (batch.ptr[1:] - batch.ptr[:-1])

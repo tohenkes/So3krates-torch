@@ -4,6 +4,7 @@ from so3krates_torch.blocks.so3_conv_invariants import L0Contraction
 import math
 from so3krates_torch.tools import scatter
 
+
 class FilterNet(torch.nn.Module):
     """
     Fig. 3e) in https://doi.org/10.1038/s41467-024-50620-6
@@ -285,7 +286,9 @@ class EuclideanAttentionBlock(torch.nn.Module):
             torch.tensor([2 * y + 1 for y in degrees])
         ).item()
         self.inv_features_dim = features_dim
-        self.so3_conv_invariants = L0Contraction(degrees=degrees, device=device)
+        self.so3_conv_invariants = L0Contraction(
+            degrees=degrees, device=device
+        )
 
         self.filter_net_inv = filter_net_inv
         self.filter_net_ev = filter_net_ev
@@ -295,24 +298,47 @@ class EuclideanAttentionBlock(torch.nn.Module):
         self.inv_head_dim = features_dim // num_heads
         self.W_q_inv = torch.nn.Parameter(
             torch.empty(
-                self.inv_heads, self.inv_head_dim, self.inv_head_dim, device=device
+                self.inv_heads,
+                self.inv_head_dim,
+                self.inv_head_dim,
+                device=device,
             )
         )
         self.W_k_inv = torch.nn.Parameter(
-            torch.empty(self.inv_heads, self.inv_head_dim, self.inv_head_dim, device=device)
+            torch.empty(
+                self.inv_heads,
+                self.inv_head_dim,
+                self.inv_head_dim,
+                device=device,
+            )
         )
         self.W_v_inv = torch.nn.Parameter(
-            torch.empty(self.inv_heads, self.inv_head_dim, self.inv_head_dim, device=device)
+            torch.empty(
+                self.inv_heads,
+                self.inv_head_dim,
+                self.inv_head_dim,
+                device=device,
+            )
         )
         # query, key weights for ev features
         # no value weights, as it uses spherical harmonics as values
         self.ev_heads = len(degrees)
         self.ev_head_dim = features_dim // len(degrees)
         self.W_q_ev = torch.nn.Parameter(
-            torch.empty(self.ev_heads, self.ev_head_dim, self.ev_head_dim, device=device)
+            torch.empty(
+                self.ev_heads,
+                self.ev_head_dim,
+                self.ev_head_dim,
+                device=device,
+            )
         )
         self.W_k_ev = torch.nn.Parameter(
-            torch.empty(self.ev_heads, self.ev_head_dim, self.ev_head_dim, device=device)
+            torch.empty(
+                self.ev_heads,
+                self.ev_head_dim,
+                self.ev_head_dim,
+                device=device,
+            )
         )
         # initialize the weights
         sqrt_5 = math.sqrt(5)
@@ -351,12 +377,14 @@ class EuclideanAttentionBlock(torch.nn.Module):
         ).to(device)
 
     def _get_qkv(
-            self,       
-            inv_features_inv: torch.Tensor,
-            inv_features_ev: torch.Tensor, 
-            receivers: torch.Tensor, 
-            senders: torch.Tensor
-            ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        self,
+        inv_features_inv: torch.Tensor,
+        inv_features_ev: torch.Tensor,
+        receivers: torch.Tensor,
+        senders: torch.Tensor,
+    ) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    ]:
         # computing the queries, keys, and values and immediately
         # selecting receivers (i) and senders (j) (Eq. 21 https://doi.org/10.1038/s41467-024-50620-6)
         q_inv = self.qk_non_linearity(
@@ -429,7 +457,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             inv_features_inv=inv_features_inv,
             inv_features_ev=inv_features_ev,
             receivers=receivers,
-            senders=senders
+            senders=senders,
         )
         # Eq. 21 https://doi.org/10.1038/s41467-024-50620-6
         filtered_k_inv = k_inv * filter_w_inv
@@ -497,7 +525,9 @@ class InteractionBlock(torch.nn.Module):
             out_features=features_dim + len_degrees,
             bias=bias,
         )
-        self.so3_conv_invariants = L0Contraction(degrees=degrees, device=device)
+        self.so3_conv_invariants = L0Contraction(
+            degrees=degrees, device=device
+        )
         # repeat the b_ev_features for each degree
         # e.g. for degrees=[0,1,2], we have repeats = [1, 3, 5]
         self.degree_repeats = torch.tensor(
@@ -544,6 +574,7 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
         filter_net_ev: callable,
         lora_rank: int = 4,
         lora_alpha: int = 1,
+        freeze_A: bool = False,
         message_normalization: str = "sqrt_num_features",
         qk_non_linearity: Optional[
             Callable[[torch.Tensor], torch.Tensor]
@@ -566,17 +597,14 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
         # LoRA parameters for invariants
         self.rank = lora_rank
         self.alpha = lora_alpha
-        self.scaling = self.alpha / self.rank
+        self.scaling = self.alpha / math.sqrt(self.rank)
         # LoRA for query weights
         self.lora_A_q_inv = torch.nn.Parameter(
-            torch.randn(
-                self.inv_heads,
-                self.inv_head_dim, 
-                lora_rank,
-                device=device
+            torch.empty(
+                self.inv_heads, self.inv_head_dim, lora_rank, device=device
+            )
         )
-            * 0.01
-        )
+        torch.nn.init.kaiming_uniform_(self.lora_A_q_inv, a=math.sqrt(5))
         self.lora_B_q_inv = torch.nn.Parameter(
             torch.zeros(
                 self.inv_heads, lora_rank, self.inv_head_dim, device=device
@@ -584,75 +612,106 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
         )
         # LoRA for key weights
         self.lora_A_k_inv = torch.nn.Parameter(
-            torch.randn(
-                self.inv_heads,
-                self.inv_head_dim,
-                lora_rank,
-                device=device
-            ) * 0.01
+            torch.empty(
+                self.inv_heads, self.inv_head_dim, lora_rank, device=device
+            )
         )
+        torch.nn.init.kaiming_uniform_(self.lora_A_k_inv, a=math.sqrt(5))
         self.lora_B_k_inv = torch.nn.Parameter(
-            torch.zeros(self.inv_heads, lora_rank, self.inv_head_dim, device=device)
+            torch.zeros(
+                self.inv_heads, lora_rank, self.inv_head_dim, device=device
+            )
         )
-        
+
         # LoRA for value weights
         self.lora_A_v_inv = torch.nn.Parameter(
-            torch.randn(self.inv_heads, self.inv_head_dim, lora_rank, device=device)
-            * 0.01
+            torch.empty(
+                self.inv_heads, self.inv_head_dim, lora_rank, device=device
+            )
         )
+        torch.nn.init.kaiming_uniform_(self.lora_A_v_inv, a=math.sqrt(5))
+
         self.lora_B_v_inv = torch.nn.Parameter(
-            torch.zeros(self.inv_heads, lora_rank, self.inv_head_dim, device=device)
+            torch.zeros(
+                self.inv_heads, lora_rank, self.inv_head_dim, device=device
+            )
         )
 
         # LoRA for ev features
         # LoRA for query weights
         self.lora_A_q_ev = torch.nn.Parameter(
-            torch.randn(self.ev_heads, self.ev_head_dim, lora_rank, device=device)
-            * 0.01
+            torch.empty(
+                self.ev_heads, self.ev_head_dim, lora_rank, device=device
+            )
         )
+        torch.nn.init.kaiming_uniform_(self.lora_A_q_ev, a=math.sqrt(5))
+
         self.lora_B_q_ev = torch.nn.Parameter(
-            torch.zeros(self.ev_heads, lora_rank, self.ev_head_dim, device=device)
+            torch.zeros(
+                self.ev_heads, lora_rank, self.ev_head_dim, device=device
+            )
         )
         # LoRA for key weights
         self.lora_A_k_ev = torch.nn.Parameter(
-            torch.randn(self.ev_heads, self.ev_head_dim, lora_rank, device=device)
-            * 0.01
+            torch.empty(
+                self.ev_heads, self.ev_head_dim, lora_rank, device=device
+            )
         )
+        torch.nn.init.kaiming_uniform_(self.lora_A_k_ev, a=math.sqrt(5))
+
         self.lora_B_k_ev = torch.nn.Parameter(
-            torch.zeros(self.ev_heads, lora_rank, self.ev_head_dim, device=device)
+            torch.zeros(
+                self.ev_heads, lora_rank, self.ev_head_dim, device=device
+            )
         )
         # No LoRA for value weights, as it uses spherical harmonics as values
 
+        if freeze_A:
+            self.lora_A_q_inv.requires_grad = False
+            self.lora_A_k_inv.requires_grad = False
+            self.lora_A_v_inv.requires_grad = False
+            self.lora_A_q_ev.requires_grad = False
+            self.lora_A_k_ev.requires_grad = False
+
     def _use_lora(self, features, W, lora_A, lora_B):
-        
+
         # lora in two steps to avoid large intermediate tensors
-        return torch.matmul(
-            features.transpose(0, 1),
-            W
-        ).transpose(0, 1) + self.scaling * torch.matmul(
-            torch.matmul(
-                features.transpose(0, 1), lora_A
-            ), lora_B
-        ).transpose(0, 1)
-        
+        return torch.matmul(features.transpose(0, 1), W).transpose(
+            0, 1
+        ) + self.scaling * torch.matmul(
+            torch.matmul(features.transpose(0, 1), lora_A), lora_B
+        ).transpose(
+            0, 1
+        )
+
         # This is the original implementation which creates a large intermediate tensor
-        
-        #return (
+
+        # return (
         #    torch.matmul(
         #        features.transpose(0, 1), W + self.scaling * torch.matmul(lora_A, lora_B)
         #    ).transpose(0, 1)
-        #)
+        # )
 
     def fuse_lora_weights(self):
         if self.weights_fused:
             return
         # Fuse the LoRA weights into the original weights for inference
         with torch.no_grad():
-            self.W_q_inv += self.scaling * torch.matmul(self.lora_A_q_inv, self.lora_B_q_inv)
-            self.W_k_inv += self.scaling * torch.matmul(self.lora_A_k_inv, self.lora_B_k_inv)
-            self.W_v_inv += self.scaling * torch.matmul(self.lora_A_v_inv, self.lora_B_v_inv)
-            self.W_q_ev += self.scaling * torch.matmul(self.lora_A_q_ev, self.lora_B_q_ev)
-            self.W_k_ev += self.scaling * torch.matmul(self.lora_A_k_ev, self.lora_B_k_ev)
+            self.W_q_inv += self.scaling * torch.matmul(
+                self.lora_A_q_inv, self.lora_B_q_inv
+            )
+            self.W_k_inv += self.scaling * torch.matmul(
+                self.lora_A_k_inv, self.lora_B_k_inv
+            )
+            self.W_v_inv += self.scaling * torch.matmul(
+                self.lora_A_v_inv, self.lora_B_v_inv
+            )
+            self.W_q_ev += self.scaling * torch.matmul(
+                self.lora_A_q_ev, self.lora_B_q_ev
+            )
+            self.W_k_ev += self.scaling * torch.matmul(
+                self.lora_A_k_ev, self.lora_B_k_ev
+            )
             # After fusing, delete the LoRA parameters to save memory
             del self.lora_A_q_inv
             del self.lora_B_q_inv
@@ -673,7 +732,13 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
         inv_features_ev: torch.Tensor,
         receivers: torch.Tensor,
         senders: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
 
         if self.weights_fused:
             # If weights are fused, use the original forward method
@@ -681,24 +746,519 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
                 inv_features_inv=inv_features_inv,
                 inv_features_ev=inv_features_ev,
                 senders=senders,
-                receivers=receivers
+                receivers=receivers,
             )
         else:
             q_inv = self.qk_non_linearity(
-                self._use_lora(inv_features_inv, self.W_q_inv, self.lora_A_q_inv, self.lora_B_q_inv)
+                self._use_lora(
+                    inv_features_inv,
+                    self.W_q_inv,
+                    self.lora_A_q_inv,
+                    self.lora_B_q_inv,
+                )
             )[receivers]
             k_inv = self.qk_non_linearity(
-                self._use_lora(inv_features_inv, self.W_k_inv, self.lora_A_k_inv, self.lora_B_k_inv)
+                self._use_lora(
+                    inv_features_inv,
+                    self.W_k_inv,
+                    self.lora_A_k_inv,
+                    self.lora_B_k_inv,
+                )
             )[senders]
             v_inv = self._use_lora(
-                inv_features_inv, self.W_v_inv, self.lora_A_v_inv, self.lora_B_v_inv
-                )[senders]
+                inv_features_inv,
+                self.W_v_inv,
+                self.lora_A_v_inv,
+                self.lora_B_v_inv,
+            )[senders]
             q_ev = self.qk_non_linearity(
-                self._use_lora(inv_features_ev, self.W_q_ev, self.lora_A_q_ev, self.lora_B_q_ev)
+                self._use_lora(
+                    inv_features_ev,
+                    self.W_q_ev,
+                    self.lora_A_q_ev,
+                    self.lora_B_q_ev,
+                )
             )[receivers]
             k_ev = self.qk_non_linearity(
-                self._use_lora(inv_features_ev, self.W_k_ev, self.lora_A_k_ev, self.lora_B_k_ev)
+                self._use_lora(
+                    inv_features_ev,
+                    self.W_k_ev,
+                    self.lora_A_k_ev,
+                    self.lora_B_k_ev,
+                )
             )[senders]
 
+            return q_inv, k_inv, v_inv, q_ev, k_ev
+
+
+class EuclideanAttentionBlockDoRA(EuclideanAttentionBlockLORA):
+    def __init__(
+        self,
+        degrees: List[int],
+        num_heads: int,
+        features_dim: int,
+        filter_net_inv: callable,
+        filter_net_ev: callable,
+        lora_rank: int = 4,
+        lora_alpha: int = 4,
+        scaling_to_one: bool = True,
+        message_normalization: str = "sqrt_num_features",
+        qk_non_linearity: Optional[
+            Callable[[torch.Tensor], torch.Tensor]
+        ] = None,
+        avg_num_neighbors: Optional[int] = None,
+        device: str = "cpu",
+    ):
+        super().__init__(
+            degrees=degrees,
+            num_heads=num_heads,
+            features_dim=features_dim,
+            filter_net_inv=filter_net_inv,
+            filter_net_ev=filter_net_ev,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            message_normalization=message_normalization,
+            qk_non_linearity=qk_non_linearity,
+            avg_num_neighbors=avg_num_neighbors,
+            device=device,
+        )
+        self.weights_fused = False
+        # LoRA parameters for invariants
+        self.rank = lora_rank
+        self.alpha = lora_alpha
+
+        if scaling_to_one:
+            self.scaling = 1.0
+        else:
+            self.scaling = self.alpha / math.sqrt(self.rank)
+
+        self.get_magnitude_vectors()
+
+    def get_magnitude_vectors(
+        self,
+    ):
+        self.dora_m_q_inv = torch.nn.Parameter(torch.norm(self.W_q_inv, dim=2))
+        self.dora_m_k_inv = torch.nn.Parameter(torch.norm(self.W_k_inv, dim=2))
+        self.dora_m_v_inv = torch.nn.Parameter(torch.norm(self.W_v_inv, dim=2))
+        self.dora_m_q_ev = torch.nn.Parameter(torch.norm(self.W_q_ev, dim=2))
+        self.dora_m_k_ev = torch.nn.Parameter(torch.norm(self.W_k_ev, dim=2))
+
+    def _get_constant_norms(
+        self,
+    ):
+        """
+        Compute normalization constants for DoRA and detach them from the computation graph.
+        """
+        self.norm_q_inv = torch.norm(
+            self.W_q_inv
+            + self.scaling
+            * torch.matmul(self.lora_A_q_inv, self.lora_B_q_inv),
+            dim=2,
+        ).detach()
+        self.norm_k_inv = torch.norm(
+            self.W_k_inv
+            + self.scaling
+            * torch.matmul(self.lora_A_k_inv, self.lora_B_k_inv),
+            dim=2,
+        ).detach()
+        self.norm_v_inv = torch.norm(
+            self.W_v_inv
+            + self.scaling
+            * torch.matmul(self.lora_A_v_inv, self.lora_B_v_inv),
+            dim=2,
+        ).detach()
+
+        self.norm_q_ev = torch.norm(
+            self.W_q_ev
+            + self.scaling * torch.matmul(self.lora_A_q_ev, self.lora_B_q_ev),
+            dim=2,
+        ).detach()
+        self.norm_k_ev = torch.norm(
+            self.W_k_ev
+            + self.scaling * torch.matmul(self.lora_A_k_ev, self.lora_B_k_ev),
+            dim=2,
+        ).detach()
+
+    def _get_qkv(
+        self,
+        inv_features_inv: torch.Tensor,
+        inv_features_ev: torch.Tensor,
+        receivers: torch.Tensor,
+        senders: torch.Tensor,
+    ) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    ]:
+
+        if self.weights_fused:
+            # If weights are fused, use the original forward method
+            return super()._get_qkv(
+                inv_features_inv=inv_features_inv,
+                inv_features_ev=inv_features_ev,
+                senders=senders,
+                receivers=receivers,
+            )
+        else:
+            self._get_constant_norms()
+            lora_q_inv = self._use_lora(
+                inv_features_inv,
+                self.W_q_inv,
+                self.lora_A_q_inv,
+                self.lora_B_q_inv,
+            )
+            q_inv = self.qk_non_linearity(
+                lora_q_inv * (self.dora_m_q_inv / self.norm_q_inv)[None, :, :]
+            )[receivers]
+            lora_k_inv = self._use_lora(
+                inv_features_inv,
+                self.W_k_inv,
+                self.lora_A_k_inv,
+                self.lora_B_k_inv,
+            )
+            k_inv = self.qk_non_linearity(
+                lora_k_inv * (self.dora_m_k_inv / self.norm_k_inv)[None, :, :]
+            )[senders]
+
+            lora_v_inv = self._use_lora(
+                inv_features_inv,
+                self.W_v_inv,
+                self.lora_A_v_inv,
+                self.lora_B_v_inv,
+            )
+            v_inv = self.qk_non_linearity(
+                lora_v_inv * (self.dora_m_v_inv / self.norm_v_inv)[None, :, :]
+            )[senders]
+
+            lora_q_ev = self._use_lora(
+                inv_features_ev,
+                self.W_q_ev,
+                self.lora_A_q_ev,
+                self.lora_B_q_ev,
+            )
+            q_ev = self.qk_non_linearity(
+                lora_q_ev * (self.dora_m_q_ev / self.norm_q_ev)[None, :, :]
+            )[receivers]
+
+            lora_k_ev = self._use_lora(
+                inv_features_ev,
+                self.W_k_ev,
+                self.lora_A_k_ev,
+                self.lora_B_k_ev,
+            )
+            k_ev = self.qk_non_linearity(
+                lora_k_ev * (self.dora_m_k_ev / self.norm_k_ev)[None, :, :]
+            )[senders]
+
+            return q_inv, k_inv, v_inv, q_ev, k_ev
+
+    def fuse_lora_weights(self):
+        if self.weights_fused:
+            return
+        # Fuse the LoRA weights into the original weights for inference
+        self._get_constant_norms()
+        with torch.no_grad():
+
+            self.W_q_inv = torch.nn.Parameter(
+                (self.dora_m_q_inv / self.norm_q_inv)[:, :, None]
+                * (
+                    self.W_q_inv
+                    + self.scaling
+                    * torch.matmul(self.lora_A_q_inv, self.lora_B_q_inv)
+                )
+            )
+            self.W_k_inv = torch.nn.Parameter(
+                (self.dora_m_k_inv / self.norm_k_inv)[:, :, None]
+                * (
+                    self.W_k_inv
+                    + self.scaling
+                    * torch.matmul(self.lora_A_k_inv, self.lora_B_k_inv)
+                )
+            )
+            self.W_v_inv = torch.nn.Parameter(
+                (self.dora_m_v_inv / self.norm_v_inv)[:, :, None]
+                * (
+                    self.W_v_inv
+                    + self.scaling
+                    * torch.matmul(self.lora_A_v_inv, self.lora_B_v_inv)
+                )
+            )
+            self.W_q_ev = torch.nn.Parameter(
+                (self.dora_m_q_ev / self.norm_q_ev)[:, :, None]
+                * (
+                    self.W_q_ev
+                    + self.scaling
+                    * torch.matmul(self.lora_A_q_ev, self.lora_B_q_ev)
+                )
+            )
+            self.W_k_ev = torch.nn.Parameter(
+                (self.dora_m_k_ev / self.norm_k_ev)[:, :, None]
+                * (
+                    self.W_k_ev
+                    + self.scaling
+                    * torch.matmul(self.lora_A_k_ev, self.lora_B_k_ev)
+                )
+            )
+            # After fusing, delete the LoRA parameters to save memory
+            del self.lora_A_q_inv
+            del self.lora_B_q_inv
+            del self.lora_A_k_inv
+            del self.lora_B_k_inv
+            del self.lora_A_v_inv
+            del self.lora_B_v_inv
+            del self.lora_A_q_ev
+            del self.lora_B_q_ev
+            del self.lora_A_k_ev
+            del self.lora_B_k_ev
+            del self.dora_m_q_inv
+            del self.dora_m_k_inv
+            del self.dora_m_v_inv
+            del self.dora_m_q_ev
+            del self.dora_m_k_ev
+            del self.norm_q_inv
+            del self.norm_k_inv
+            del self.norm_v_inv
+            del self.norm_q_ev
+            del self.norm_k_ev
+
+        self.weights_fused = True
+
+
+class EuclideanAttentionBlockVeRA(EuclideanAttentionBlockLORA):
+    def __init__(
+        self,
+        degrees: List[int],
+        num_heads: int,
+        features_dim: int,
+        vera_A_matrix_inv: torch.Tensor,
+        vera_B_matrix_inv: torch.Tensor,
+        vera_A_matrix_ev: torch.Tensor,
+        vera_B_matrix_ev: torch.Tensor,
+        filter_net_inv: callable,
+        filter_net_ev: callable,
+        lora_rank: int = 4,
+        lora_alpha: int = 8,
+        scaling_to_one: bool = True,
+        message_normalization: str = "sqrt_num_features",
+        qk_non_linearity: Optional[
+            Callable[[torch.Tensor], torch.Tensor]
+        ] = None,
+        avg_num_neighbors: Optional[int] = None,
+        device: str = "cpu",
+    ):
+        super().__init__(
+            degrees=degrees,
+            num_heads=num_heads,
+            features_dim=features_dim,
+            filter_net_inv=filter_net_inv,
+            filter_net_ev=filter_net_ev,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            message_normalization=message_normalization,
+            qk_non_linearity=qk_non_linearity,
+            avg_num_neighbors=avg_num_neighbors,
+            device=device,
+        )
+        self.weights_fused = False
+        # VeRA parameters for invariants
+        self.rank = lora_rank
+        self.alpha = lora_alpha
+        if scaling_to_one:
+            self.scaling = 1.0
+        else:
+            self.scaling = self.alpha / math.sqrt(self.rank)
+
+        # A, B are passed as arguments so that they can be shared across layers
+        assert vera_A_matrix_inv.shape == (
+            self.inv_heads,
+            self.inv_head_dim,
+            lora_rank,
+        )
+        assert vera_B_matrix_inv.shape == (
+            self.inv_heads,
+            lora_rank,
+            self.inv_head_dim,
+        )
+        assert vera_A_matrix_ev.shape == (
+            self.ev_heads,
+            self.ev_head_dim,
+            lora_rank,
+        )
+        assert vera_B_matrix_ev.shape == (
+            self.ev_heads,
+            lora_rank,
+            self.ev_head_dim,
+        )
+        vera_A_matrix_inv.requires_grad = False
+        vera_B_matrix_inv.requires_grad = False
+        vera_A_matrix_ev.requires_grad = False
+        vera_B_matrix_ev.requires_grad = False
+        self.vera_A_matrix_inv = vera_A_matrix_inv.to(device)
+        self.vera_B_matrix_inv = vera_B_matrix_inv.to(device)
+        self.vera_A_matrix_ev = vera_A_matrix_ev.to(device)
+        self.vera_B_matrix_ev = vera_B_matrix_ev.to(device)
+
+        self.d_k_inv = torch.nn.Parameter(
+            torch.ones(self.inv_heads, self.rank, device=device)
+        )
+        self.b_k_inv = torch.nn.Parameter(
+            torch.zeros(self.inv_heads, self.rank, device=device)
+        )
+        self.d_v_inv = torch.nn.Parameter(
+            torch.ones(self.inv_heads, self.rank, device=device)
+        )
+        self.b_v_inv = torch.nn.Parameter(
+            torch.zeros(self.inv_heads, self.rank, device=device)
+        )
+        self.d_q_inv = torch.nn.Parameter(
+            torch.ones(self.inv_heads, self.rank, device=device)
+        )
+        self.b_q_inv = torch.nn.Parameter(
+            torch.zeros(self.inv_heads, self.rank, device=device)
+        )
+
+        self.b_k_ev = torch.nn.Parameter(
+            torch.zeros(self.ev_heads, self.rank, device=device)
+        )
+        self.d_k_ev = torch.nn.Parameter(
+            torch.ones(self.ev_heads, self.rank, device=device)
+        )
+        self.b_q_ev = torch.nn.Parameter(
+            torch.zeros(self.ev_heads, self.rank, device=device)
+        )
+        self.d_q_ev = torch.nn.Parameter(
+            torch.ones(self.ev_heads, self.rank, device=device)
+        )
+
+    def _use_lora(self, features, W, lora_A, lora_B, vera_b, vera_d):
+        features_lora = torch.matmul(
+            features.transpose(0, 1), lora_A
+        ).transpose(0, 1)
+
+        features_lora = features_lora * vera_d[None, :, :]
+        B_scaled = lora_B * vera_b[:, :, None]
+
+        features_lora = torch.matmul(
+            features_lora.transpose(0, 1), B_scaled
+        ).transpose(0, 1)
+
+        return (
+            torch.matmul(features.transpose(0, 1), W).transpose(0, 1)
+            + self.scaling * features_lora
+        )
+
+    def fuse_lora_weights(self):
+        if self.weights_fused:
+            return
+        # Fuse the VeRA weights into the original weights for inference
+        with torch.no_grad():
+            self.W_q_inv = self.W_q_inv + self.scaling * torch.matmul(
+                self.vera_A_matrix_inv * self.d_q_inv[:, None, :],
+                self.vera_B_matrix_inv * self.b_q_inv[:, None, :],
+            )
+            self.W_k_inv = self.W_k_inv + self.scaling * torch.matmul(
+                self.vera_A_matrix_inv * self.d_k_inv[:, None, :],
+                self.vera_B_matrix_inv * self.b_k_inv[:, None, :],
+            )
+            self.W_v_inv = self.W_v_inv + self.scaling * torch.matmul(
+                self.vera_A_matrix_inv * self.d_v_inv[:, None, :],
+                self.vera_B_matrix_inv * self.b_v_inv[:, None, :],
+            )
+            self.W_q_ev = self.W_q_ev + self.scaling * torch.matmul(
+                self.vera_A_matrix_ev * self.d_q_ev[:, None, :],
+                self.vera_B_matrix_ev * self.b_q_ev[:, None, :],
+            )
+            self.W_k_ev = self.W_k_ev + self.scaling * torch.matmul(
+                self.vera_A_matrix_ev * self.d_k_ev[:, None, :],
+                self.vera_B_matrix_ev * self.b_k_ev[:, None, :],
+            )
+            # After fusing, delete the VeRA parameters to save memory
+            del self.vera_A_matrix_ev
+            del self.vera_B_matrix_ev
+            del self.vera_A_matrix_inv
+            del self.vera_B_matrix_inv
+            del self.d_q_inv
+            del self.b_q_inv
+            del self.d_k_inv
+            del self.b_k_inv
+            del self.d_v_inv
+            del self.b_v_inv
+            del self.d_q_ev
+            del self.b_q_ev
+            del self.d_k_ev
+            del self.b_k_ev
+
+        self.weights_fused = True
+
+    def _get_qkv(
+        self,
+        inv_features_inv: torch.Tensor,
+        inv_features_ev: torch.Tensor,
+        receivers: torch.Tensor,
+        senders: torch.Tensor,
+    ) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    ]:
+
+        if self.weights_fused:
+            # If weights are fused, use the original forward method
+            return super()._get_qkv(
+                inv_features_inv=inv_features_inv,
+                inv_features_ev=inv_features_ev,
+                senders=senders,
+                receivers=receivers,
+            )
+        else:
+            q_inv = self.qk_non_linearity(
+                self._use_lora(
+                    features=inv_features_inv,
+                    W=self.W_q_inv,
+                    lora_A=self.vera_A_matrix_inv,
+                    lora_B=self.vera_B_matrix_inv,
+                    vera_b=self.b_q_inv,
+                    vera_d=self.d_q_inv,
+                )
+            )[receivers]
+            k_inv = self.qk_non_linearity(
+                self._use_lora(
+                    features=inv_features_inv,
+                    W=self.W_k_inv,
+                    lora_A=self.vera_A_matrix_inv,
+                    lora_B=self.vera_B_matrix_inv,
+                    vera_b=self.b_k_inv,
+                    vera_d=self.d_k_inv,
+                )
+            )[senders]
+
+            v_inv = self.qk_non_linearity(
+                self._use_lora(
+                    features=inv_features_inv,
+                    W=self.W_v_inv,
+                    lora_A=self.vera_A_matrix_inv,
+                    lora_B=self.vera_B_matrix_inv,
+                    vera_b=self.b_v_inv,
+                    vera_d=self.d_v_inv,
+                )
+            )[senders]
+
+            q_ev = self.qk_non_linearity(
+                self._use_lora(
+                    features=inv_features_ev,
+                    W=self.W_q_ev,
+                    lora_A=self.vera_A_matrix_ev,
+                    lora_B=self.vera_B_matrix_ev,
+                    vera_b=self.b_q_ev,
+                    vera_d=self.d_q_ev,
+                )
+            )[receivers]
+
+            k_ev = self.qk_non_linearity(
+                self._use_lora(
+                    features=inv_features_ev,
+                    W=self.W_k_ev,
+                    lora_A=self.vera_A_matrix_ev,
+                    lora_B=self.vera_B_matrix_ev,
+                    vera_b=self.b_k_ev,
+                    vera_d=self.d_k_ev,
+                )
+            )[senders]
 
             return q_inv, k_inv, v_inv, q_ev, k_ev

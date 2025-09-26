@@ -96,7 +96,7 @@ class So3krates(torch.nn.Module):
         )
 
         torch.manual_seed(seed)
-        
+
         self.energy_regression_dim = energy_regression_dim
         self.features_dim = features_dim
         self.final_mlp_layers = final_mlp_layers
@@ -105,7 +105,7 @@ class So3krates(torch.nn.Module):
         self.learn_atomic_type_scales = learn_atomic_type_scales
         self.num_elements = num_elements
         self.degrees = degrees
-        
+
         if cutoff_fn == "polynomial":
             self.cutoff_fn = cutoff_fn_dict[cutoff_fn](r_max, p=cutoff_p)
         else:
@@ -367,7 +367,7 @@ class So3krates(torch.nn.Module):
             index=batch_segments,
             dim=0,
             dim_size=data["ptr"].shape[0] - 1,
-        )
+        ).squeeze(-1)
 
         forces, virials, stress, hessian, edge_forces = utils.get_outputs(
             energy=total_energy,
@@ -382,7 +382,6 @@ class So3krates(torch.nn.Module):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
         )
-
         return {
             "energy": total_energy,
             "forces": forces,
@@ -480,7 +479,10 @@ class SO3LR(So3krates):
     ):
         if self.zbl_repulsion_bool and zbl_atomic_energies is not None:
             atomic_energies += zbl_atomic_energies
-        if self.electrostatic_energy_bool and electrostatic_energies is not None:
+        if (
+            self.electrostatic_energy_bool
+            and electrostatic_energies is not None
+        ):
             atomic_energies += electrostatic_energies
         if self.dispersion_energy_bool and dispersion_energies is not None:
             atomic_energies += dispersion_energies
@@ -499,7 +501,7 @@ class SO3LR(So3krates):
         compute_stress: bool = False,
         compute_hessian: bool = False,
         compute_edge_forces: bool = False,
-        batch: Optional[torch.tensor] = None
+        batch: Optional[torch.tensor] = None,
     ):
         return utils.get_outputs(
             energy=energy,
@@ -611,7 +613,7 @@ class SO3LR(So3krates):
                 cutoff_lr_damping=self.dispersion_energy_cutoff_lr_damping,
                 dispersion_energy_scale=self.dispersion_energy_scale,
             )
-        
+
         atomic_energies = self._combine_energies(
             atomic_energies=atomic_energies,
             zbl_atomic_energies=zbl_atomic_energies,
@@ -623,7 +625,7 @@ class SO3LR(So3krates):
             index=data["batch"],
             dim=0,
             dim_size=data["ptr"].shape[0] - 1,
-        )
+        ).squeeze(-1)
 
         forces, virials, stress, hessian, edge_forces = self._get_outputs(
             energy=total_energy,
@@ -637,8 +639,9 @@ class SO3LR(So3krates):
             compute_stress=compute_stress,
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
-            batch=data["batch"]
+            batch=data["batch"],
         )
+
         return {
             "energy": total_energy,
             "forces": forces,
@@ -685,7 +688,7 @@ class MultiHeadSO3LR(SO3LR):
             num_elements=self.num_elements,
             num_output_heads=self.num_output_heads,
         )
-    
+
     def _get_outputs(
         self,
         energy: torch.Tensor,
@@ -699,10 +702,10 @@ class MultiHeadSO3LR(SO3LR):
         compute_stress: bool = False,
         compute_hessian: bool = False,
         compute_edge_forces: bool = False,
-        batch: Optional[torch.tensor] = None
+        batch: Optional[torch.tensor] = None,
     ):
         forces, virials, stress, hessian, edge_forces = utils.get_outputs(
-            energy=energy, 
+            energy=energy,
             positions=positions,
             displacement=displacement,
             vectors=vectors,
@@ -714,11 +717,12 @@ class MultiHeadSO3LR(SO3LR):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
             is_multihead=True,
-            batch=batch
+            batch=batch,
         )
+        # select head
+        # head_idx =
         return forces, virials, stress, hessian, edge_forces
-    
-    
+
     def _combine_energies(
         self,
         atomic_energies: torch.Tensor,
@@ -729,7 +733,10 @@ class MultiHeadSO3LR(SO3LR):
         # atomic_energies has shape (num_atoms, num_output_heads)
         if self.zbl_repulsion_bool and zbl_atomic_energies is not None:
             atomic_energies += zbl_atomic_energies.unsqueeze(-1)
-        if self.electrostatic_energy_bool and electrostatic_energies is not None:
+        if (
+            self.electrostatic_energy_bool
+            and electrostatic_energies is not None
+        ):
             atomic_energies += electrostatic_energies.unsqueeze(-1)
         if self.dispersion_energy_bool and dispersion_energies is not None:
             atomic_energies += dispersion_energies.unsqueeze(-1)

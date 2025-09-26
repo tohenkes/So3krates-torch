@@ -18,7 +18,11 @@ from mace.tools.utils import MetricsLogger, setup_logger
 from mace.tools.checkpoint import CheckpointHandler, CheckpointState
 from torch_ema import ExponentialMovingAverage
 from so3krates_torch.tools.train import train
-from so3krates_torch.tools.finetune import freeze_model_parameters, model_to_lora, fuse_lora_weights
+from so3krates_torch.tools.finetune import (
+    freeze_model_parameters,
+    model_to_lora,
+    fuse_lora_weights,
+)
 import os
 
 
@@ -289,7 +293,10 @@ def setup_loss_function(config: dict) -> torch.nn.Module:
 
 
 def setup_optimizer_and_scheduler(
-    model: torch.nn.Module, config: dict
+    model: torch.nn.Module,
+    config: dict,
+    use_lora_plus: bool = False,
+    lora_B_lr: float = None,
 ) -> tuple:
     """Setup optimizer and learning rate scheduler."""
     train_config = config["TRAINING"]
@@ -298,14 +305,53 @@ def setup_optimizer_and_scheduler(
     optimizer_name = train_config.get("optimizer", "adam").lower()
     lr = train_config["lr"]
     weight_decay = train_config.get("weight_decay", 0.0)
+    amsgrad = train_config.get("amsgrad", False)
 
     if optimizer_name == "adam":
-        optimizer = torch.optim.Adam(
-            model.parameters(),
-            lr=lr,
-            weight_decay=weight_decay,
-            amsgrad=train_config.get("amsgrad", False),
-        )
+        if use_lora_plus:
+            assert (
+                lora_B_lr is not None
+            ), "lora_A_lr must be provided for LoRA+"
+            lr = lora_B_lr
+            # for LoRA+ adjust learning rate for A and B matrices
+            optimizer = torch.optim.Adam(
+                [
+                    {
+                        "params": [
+                            p
+                            for n, p in model.named_parameters()
+                            if "lora_A" in n
+                        ],
+                        "lr": lr,
+                    },
+                    {
+                        "params": [
+                            p
+                            for n, p in model.named_parameters()
+                            if "lora_B" in n
+                        ],
+                        "lr": lora_B_lr,
+                    },
+                    {
+                        "params": [
+                            p
+                            for n, p in model.named_parameters()
+                            if "lora_A" not in n and "lora_B" not in n
+                        ]
+                    },
+                ],
+                lr=lr,
+                weight_decay=weight_decay,
+                amsgrad=amsgrad,
+            )
+        else:
+            optimizer = torch.optim.Adam(
+                model.parameters(),
+                lr=lr,
+                weight_decay=weight_decay,
+                amsgrad=amsgrad,
+            )
+
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
@@ -534,7 +580,9 @@ def load_checkpoint_if_exists(
         return 0
 
 
-def setup_finetuning(config: dict, model: torch.nn.Module, device_name: str) -> None:
+def setup_finetuning(
+    config: dict, model: torch.nn.Module, device_name: str
+) -> None:
     # check that a pre-trained model is provided
     choice = config["TRAINING"].get("finetune_choice", None)
     if choice is not None:
@@ -547,20 +595,52 @@ def setup_finetuning(config: dict, model: torch.nn.Module, device_name: str) -> 
             "Please provide 'pretrained_weights' or 'pretrained_model' in the config."
         )
         logging.info(f"Setting up finetuning with choice: {choice}")
-        
+
+        lora_rank = config["TRAINING"].get("lora_rank", 4)
+        lora_alpha = config["TRAINING"].get("lora_alpha", 2.0 * lora_rank)
+
         if choice == "lora":
             model = model_to_lora(
                 model,
-                rank=config["TRAINING"].get("lora_rank", 4),
-                alpha=config["TRAINING"].get("lora_alpha", 8.0),
+                rank=lora_rank,
+                alpha=lora_alpha,
+                freeze_A=config["TRAINING"].get("lora_freeze_A", False),
                 device=device_name,
+                seed=config["GENERAL"].get("seed", 42),
             )
             logging.info("Converted model to LoRA format")
-        
+
+        elif choice == "dora":
+            model = model_to_lora(
+                model,
+                rank=lora_rank,
+                alpha=lora_alpha,
+                use_dora=True,
+                device=device_name,
+                scaling_to_one=config["TRAINING"].get(
+                    "dora_scaling_to_one", True
+                ),
+            )
+            logging.info("Converted model to DoRA format")
+
+        elif choice == "vera":
+            model = model_to_lora(
+                model,
+                rank=lora_rank,
+                alpha=lora_alpha,
+                use_vera=True,
+                device=device_name,
+                scaling_to_one=config["TRAINING"].get(
+                    "vera_scaling_to_one", True
+                ),
+            )
+            logging.info("Converted model to VeRA format")
+
         if choice != "naive":
             freeze_model_parameters(
                 model,
                 choice,
+                freeze_lora_A=config["TRAINING"].get("lora_freeze_A", False),
             )
         # log number of trainable params, absolute and percentage
         total_params = sum(p.numel() for p in model.parameters())
@@ -714,13 +794,16 @@ def main():
     logging.info("Training completed successfully!")
 
     # TODO: fuse model weights if using LoRA before saving
-    if config["TRAINING"].get("finetune_choice", None) == "lora":
+    if config["TRAINING"].get("finetune_choice", None) in [
+        "dora",
+        "lora",
+        "vera",
+    ]:
         logging.info("Fusing LoRA weights into base model for saving...")
         model = fuse_lora_weights(model)
         logging.info("LoRA weights fused successfully.")
     # TODO: use EMA weights if enabled before saving
 
-    
     # save the model in the working directory
     final_model_path = f'{config["GENERAL"]["name_exp"]}.pth'
     torch.save(model.state_dict(), final_model_path)
