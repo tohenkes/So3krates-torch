@@ -924,9 +924,7 @@ class EuclideanAttentionBlockDoRA(EuclideanAttentionBlockLORA):
                 self.lora_A_v_inv,
                 self.lora_B_v_inv,
             )
-            v_inv = self.qk_non_linearity(
-                lora_v_inv * (self.dora_m_v_inv / self.norm_v_inv)[None, :, :]
-            )[senders]
+            v_inv = lora_v_inv * (self.dora_m_v_inv / self.norm_v_inv)[None, :, :][senders]
 
             lora_q_ev = self._use_lora(
                 inv_features_ev,
@@ -1150,25 +1148,40 @@ class EuclideanAttentionBlockVeRA(EuclideanAttentionBlockLORA):
             return
         # Fuse the VeRA weights into the original weights for inference
         with torch.no_grad():
-            self.W_q_inv = self.W_q_inv + self.scaling * torch.matmul(
-                self.vera_A_matrix_inv * self.d_q_inv[:, None, :],
-                self.vera_B_matrix_inv * self.b_q_inv[:, None, :],
+            self.W_q_inv.add_(
+                self.scaling
+                * torch.matmul(
+                    self.vera_A_matrix_inv * self.d_q_inv[:, None, :],
+                    self.vera_B_matrix_inv * self.b_q_inv[:, :, None],
+                )
             )
-            self.W_k_inv = self.W_k_inv + self.scaling * torch.matmul(
-                self.vera_A_matrix_inv * self.d_k_inv[:, None, :],
-                self.vera_B_matrix_inv * self.b_k_inv[:, None, :],
+            self.W_k_inv.add_(
+                self.scaling
+                * torch.matmul(
+                    self.vera_A_matrix_inv * self.d_k_inv[:, None, :],
+                    self.vera_B_matrix_inv * self.b_k_inv[:, :, None],
+                )
             )
-            self.W_v_inv = self.W_v_inv + self.scaling * torch.matmul(
-                self.vera_A_matrix_inv * self.d_v_inv[:, None, :],
-                self.vera_B_matrix_inv * self.b_v_inv[:, None, :],
+            self.W_v_inv.add_(
+                self.scaling
+                * torch.matmul(
+                    self.vera_A_matrix_inv * self.d_v_inv[:, None, :],
+                    self.vera_B_matrix_inv * self.b_v_inv[:, :, None],
+                )
             )
-            self.W_q_ev = self.W_q_ev + self.scaling * torch.matmul(
-                self.vera_A_matrix_ev * self.d_q_ev[:, None, :],
-                self.vera_B_matrix_ev * self.b_q_ev[:, None, :],
+            self.W_q_ev.add_(
+                self.scaling
+                * torch.matmul(
+                    self.vera_A_matrix_ev * self.d_q_ev[:, None, :],
+                    self.vera_B_matrix_ev * self.b_q_ev[:, :, None],
+                )
             )
-            self.W_k_ev = self.W_k_ev + self.scaling * torch.matmul(
-                self.vera_A_matrix_ev * self.d_k_ev[:, None, :],
-                self.vera_B_matrix_ev * self.b_k_ev[:, None, :],
+            self.W_k_ev.add_(
+                self.scaling
+                * torch.matmul(
+                    self.vera_A_matrix_ev * self.d_k_ev[:, None, :],
+                    self.vera_B_matrix_ev * self.b_k_ev[:, :, None],
+                )
             )
             # After fusing, delete the VeRA parameters to save memory
             del self.vera_A_matrix_ev
@@ -1228,16 +1241,14 @@ class EuclideanAttentionBlockVeRA(EuclideanAttentionBlockLORA):
                 )
             )[senders]
 
-            v_inv = self.qk_non_linearity(
-                self._use_lora(
+            v_inv = self._use_lora(
                     features=inv_features_inv,
                     W=self.W_v_inv,
                     lora_A=self.vera_A_matrix_inv,
                     lora_B=self.vera_B_matrix_inv,
                     vera_b=self.b_v_inv,
                     vera_d=self.d_v_inv,
-                )
-            )[senders]
+                )[senders]
 
             q_ev = self.qk_non_linearity(
                 self._use_lora(
