@@ -3,9 +3,14 @@ import logging
 import yaml
 import torch
 from ase.io import read
-
+import random
+from typing import Tuple
 from so3krates_torch.modules.models import SO3LR
-from so3krates_torch.tools.utils import create_dataloader
+from so3krates_torch.tools.utils import (
+    create_dataloader_from_list,
+    create_data_from_list,
+    create_dataloader_from_data
+)
 from so3krates_torch.modules.loss import (
     WeightedEnergyForcesDipoleLoss,
     WeightedEnergyForcesHirshfeldLoss,
@@ -126,6 +131,23 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
     return model
 
 
+def select_valid_subset(
+    data: list,
+    valid_ratio: float,
+    num_train :int = None,
+    num_valid: int = None
+) -> Tuple[list, list]:
+    n_valid = int(len(data) * valid_ratio)
+    n_train = len(data) - n_valid
+    if num_train is not None:
+        n_train = min(n_train, num_train)
+    if num_valid is not None:
+        n_valid = min(n_valid, num_valid)
+    random.shuffle(data)
+    
+    return data[:n_train], data[n_train : n_train + n_valid]
+
+
 def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     """Setup training and validation data loaders."""
     # Key specification for data loading
@@ -136,6 +158,34 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
             "forces": "REF_forces",
         },
     )
+    # Create data loaders
+    batch_size = config["TRAINING"]["batch_size"]
+    valid_batch_size = config["TRAINING"]["valid_batch_size"]
+    r_max_lr = config["TRAINING"].get("neighbors_lr_cutoff", 100.0)
+    
+    heads = config["TRAINING"].get("heads", None)
+    if heads is not None:
+        
+        head_data = {}
+        for head_name, head_config in heads.items():
+            head_data = read(head_config["path_to_train_data"], index=":")
+            head_valid_path = head_config.get("path_to_val_data", None)
+            if head_valid_path:
+                head_val_data = read(head_valid_path, index=":")
+            else:
+                valid_ratio = head_config.get("valid_ratio", 0.1)
+                num_train = head_config.get("num_train", None)
+                num_valid = head_config.get("num_valid", None)
+                head_train_data, head_val_data = select_valid_subset(
+                    head_data, valid_ratio, num_train, num_valid
+                )
+            logging.info(f"Head {head_name} - Training set size: {len(head_train_data)}")
+            logging.info(f"Head {head_name} - Validation set size: {len(head_val_data)}")
+            
+            
+            
+
+            
 
     # Load data
     data_path = config["TRAINING"]["path_to_train_data"]
@@ -162,15 +212,12 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
         train_data = data[:n_train]
         val_data = data[n_train : n_train + n_valid]
 
+
     logging.info(f"Training set size: {len(train_data)}")
     logging.info(f"Validation set size: {len(val_data)}")
 
-    # Create data loaders
-    batch_size = config["TRAINING"]["batch_size"]
-    valid_batch_size = config["TRAINING"]["valid_batch_size"]
-    r_max_lr = config["TRAINING"].get("neighbors_lr_cutoff", 100.0)
 
-    train_loader = create_dataloader(
+    train_loader = create_dataloader_from_data(
         train_data,
         batch_size=batch_size,
         r_max=model.r_max,
@@ -179,7 +226,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
         shuffle=True,
     )
 
-    valid_loader = create_dataloader(
+    valid_loader = create_dataloader_from_data(
         val_data,
         batch_size=valid_batch_size,
         r_max=model.r_max,
@@ -599,7 +646,7 @@ def setup_finetuning(
         lora_rank = config["TRAINING"].get("lora_rank", 4)
         lora_alpha = config["TRAINING"].get("lora_alpha", 2.0 * lora_rank)
 
-        if choice == "lora":
+        if choice == "lora" or choice == "lora+mlp":
             model = model_to_lora(
                 model,
                 rank=lora_rank,

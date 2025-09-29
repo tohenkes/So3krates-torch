@@ -189,7 +189,17 @@ def freeze_model_parameters(
     freeze_embedding: bool = True,
     freeze_lora_A: bool = False,
 ):
-    possible_choices = ["last_layer", "mlp", "qkv", "lora", "dora", "vera"]
+    possible_choices = [
+        "last_layer",
+        "mlp",
+        "qkv",
+        "lora",
+        "dora",
+        "vera",
+        "last_layer+mlp",
+        "qkv+mlp",
+        "lora+mlp",
+        ]
     if keep_trainable_choice not in possible_choices:
         raise ValueError(
             f"Invalid choice '{keep_trainable_choice}'. Must be one of {possible_choices}."
@@ -205,7 +215,10 @@ def freeze_model_parameters(
     # Determine which transformer layers to keep trainable based on choice
     num_layers = len(model.euclidean_transformers)
 
-    if keep_trainable_choice == "last_layer":
+    if keep_trainable_choice == "last_layer" or keep_trainable_choice == "last_layer+mlp":
+        if keep_trainable_choice == "last_layer+mlp":
+            # Also keep the MLP part of the last layer trainable
+            keep_trainable.append(f"euclidean_transformers.{num_layers-1}.euclidean_mlp")
         # Keep only the last transformer layer trainable
         keep_trainable.append(f"euclidean_transformers.{num_layers-1}")
 
@@ -214,13 +227,17 @@ def freeze_model_parameters(
         for i in range(num_layers):
             keep_trainable.append(f"euclidean_transformers.{i}.euclidean_mlp")
 
-    elif keep_trainable_choice == "qkv":
+    elif keep_trainable_choice == "qkv" or keep_trainable_choice == "qkv+mlp":
         # Keep only the QKV projection layers trainable
         for i in range(num_layers):
+            if keep_trainable_choice == "qkv+mlp":
+                keep_trainable.append(f"euclidean_transformers.{i}.euclidean_mlp")
             keep_trainable.append(
                 f"euclidean_transformers.{i}.euclidean_attention_block"
             )
-    elif keep_trainable_choice == "lora":
+    
+    elif keep_trainable_choice == "lora" or keep_trainable_choice == "lora+mlp":
+        
         # Keep only the LoRA parameters trainable
         for i in range(num_layers):
             if freeze_lora_A:
@@ -231,6 +248,10 @@ def freeze_model_parameters(
                 keep_trainable.append(
                     f"euclidean_transformers.{i}.euclidean_attention_block.lora_"
                 )
+                
+            if keep_trainable_choice == "lora+mlp":
+                keep_trainable.append(f"euclidean_transformers.{i}.euclidean_mlp")
+     
     elif keep_trainable_choice == "dora":
         # Keep only the DoRA parameters trainable
         for i in range(num_layers):
@@ -262,6 +283,7 @@ def freeze_model_parameters(
                 f"euclidean_transformers.{i}.euclidean_attention_block.b_v_"
             )
 
+    
     # Handle optional components based on freeze flags
     if not freeze_shifts:
         keep_trainable.append("atomic_energy_output_block.energy_shifts")
