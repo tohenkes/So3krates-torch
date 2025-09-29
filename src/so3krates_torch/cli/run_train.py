@@ -165,8 +165,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     
     heads = config["TRAINING"].get("heads", None)
     if heads is not None:
-        
-        head_data = {}
+        head_data = []
         for head_name, head_config in heads.items():
             head_data = read(head_config["path_to_train_data"], index=":")
             head_valid_path = head_config.get("path_to_val_data", None)
@@ -181,6 +180,16 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
                 )
             logging.info(f"Head {head_name} - Training set size: {len(head_train_data)}")
             logging.info(f"Head {head_name} - Validation set size: {len(head_val_data)}")
+            
+            head_config_list_train = create_data_from_list(
+                head_train_data,
+                r_max=model.r_max,
+                r_max_lr=r_max_lr,
+                key_specification=keyspec,
+                head=head_name
+            )
+            
+            head_data.extend(head_config_list_train)
             
             
             
@@ -217,7 +226,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     logging.info(f"Validation set size: {len(val_data)}")
 
 
-    train_loader = create_dataloader_from_data(
+    train_loader = create_dataloader_from_list(
         train_data,
         batch_size=batch_size,
         r_max=model.r_max,
@@ -226,7 +235,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
         shuffle=True,
     )
 
-    valid_loader = create_dataloader_from_data(
+    valid_loader = create_dataloader_from_list(
         val_data,
         batch_size=valid_batch_size,
         r_max=model.r_max,

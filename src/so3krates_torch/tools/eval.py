@@ -13,7 +13,7 @@ from mace.tools.utils import (
     compute_rel_rmse,
     compute_rmse,
 )
-from so3krates_torch.tools.utils import create_dataloader
+from so3krates_torch.tools.utils import create_dataloader_from_list
 from torchmetrics import Metric
 import time
 
@@ -88,7 +88,7 @@ def evaluate_model(
         "mace",
     ], f"Unknown model type: {model_type}"
 
-    data_loader = create_dataloader(
+    data_loader = create_dataloader_from_list(
         atoms_list=atoms_list,
         batch_size=batch_size,
         r_max=model.r_max,
@@ -725,7 +725,7 @@ def test_ensemble(
     reference_model = ensemble[list(ensemble.keys())[0]]
 
     # Create dataloader using the create_dataloader function
-    data_loader = create_dataloader(
+    data_loader = create_dataloader_from_list(
         atoms_list=data_to_use,
         batch_size=batch_size,
         r_max=reference_model.r_max,
