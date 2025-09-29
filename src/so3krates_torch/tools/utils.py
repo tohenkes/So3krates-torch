@@ -57,7 +57,7 @@ def compute_forces_virials(
 
 
 def compute_multihead_forces(energy, positions, batch, training=True):
-    num_graphs, num_heads, _ = energy.shape
+    num_graphs, num_heads = energy.shape
     # change shape to [num_heads,num_graphs]
     energy_for_grad = energy.view(num_graphs, num_heads).permute(1, 0)
     grad_outputs = torch.zeros(

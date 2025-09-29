@@ -924,7 +924,9 @@ class EuclideanAttentionBlockDoRA(EuclideanAttentionBlockLORA):
                 self.lora_A_v_inv,
                 self.lora_B_v_inv,
             )
-            v_inv = lora_v_inv * (self.dora_m_v_inv / self.norm_v_inv)[None, :, :][senders]
+            v_inv = (
+                lora_v_inv * (self.dora_m_v_inv / self.norm_v_inv)[None, :, :]
+                )[senders]
 
             lora_q_ev = self._use_lora(
                 inv_features_ev,
