@@ -751,6 +751,11 @@ def run_training(config: dict) -> None:
         config: Configuration dictionary containing all training parameters
     """
     # Setup logging
+    # Clear all handlers from root
+    logging.getLogger().handlers.clear()
+
+    # Clear all existing loggers
+    logging.Logger.manager.loggerDict.clear()
     setup_logging(config)
 
     # Get pretrained model settings from config
