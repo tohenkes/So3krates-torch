@@ -231,9 +231,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
 
         # Compute average number of neighbors
         avg_num_neighbors = compute_avg_num_neighbors(train_loader)
-        model.avg_num_neighbors = avg_num_neighbors
-        logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
-        return train_loader, val_data
+        return train_loader, val_data, avg_num_neighbors
 
     else:
         # Load data
@@ -282,7 +280,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
         avg_num_neighbors = compute_avg_num_neighbors(train_loader)
         model.avg_num_neighbors = avg_num_neighbors
         logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
-        return train_loader, {"main": valid_loader}
+        return train_loader, {"main": valid_loader}, avg_num_neighbors
 
 
 def setup_loss_function(config: dict) -> torch.nn.Module:
@@ -782,6 +780,7 @@ def run_training(config: dict) -> None:
     logging.info(f"Using device: {device}")
 
     # Handle model creation and pretrained loading
+    warm_start = False
     if pretrained_model:
         # Load complete pretrained model (ignores config architecture)
         model = load_pretrained_model_direct(pretrained_model, device)
@@ -789,6 +788,7 @@ def run_training(config: dict) -> None:
             "Using complete pretrained model, ignoring config "
             "architecture settings"
         )
+        warm_start = True
     else:
         # Create model from config
         model = create_model(config, device)
@@ -796,12 +796,32 @@ def run_training(config: dict) -> None:
         # Load pretrained weights if specified
         if pretrained_weights:
             load_pretrained_weights(model, pretrained_weights, device)
+            warm_start = True
 
     # Setup finetuning if specified
     setup_finetuning(config, model, device_name)
 
     # Setup data loaders
-    train_loader, valid_loaders = setup_data_loaders(config, model)
+    train_loader, valid_loaders, avg_num_neighbors = setup_data_loaders(
+        config, model
+    )
+
+    if warm_start:
+        fine_tune_choice = config["TRAINING"].get("finetune_choice", None)
+        if fine_tune_choice == "naive":
+            model.avg_num_neighbors = avg_num_neighbors
+            logging.info(
+                "Warm starting with naive finetuning, updating "
+                "avg_num_neighbors"
+            )
+        else:
+            logging.info(
+                "Warm starting with non-naive finetuning, "
+                "keeping original avg_num_neighbors"
+            )
+
+    else:
+        model.avg_num_neighbors = avg_num_neighbors
 
     # Setup loss function
     loss_fn = setup_loss_function(config)
