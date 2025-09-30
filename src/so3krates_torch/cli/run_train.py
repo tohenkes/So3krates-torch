@@ -5,11 +5,11 @@ import torch
 from ase.io import read
 import random
 from typing import Tuple
-from so3krates_torch.modules.models import SO3LR
+from so3krates_torch.modules.models import SO3LR, MultiHeadSO3LR
 from so3krates_torch.tools.utils import (
     create_dataloader_from_list,
     create_data_from_list,
-    create_dataloader_from_data
+    create_dataloader_from_data,
 )
 from so3krates_torch.modules.loss import (
     WeightedEnergyForcesDipoleLoss,
@@ -122,20 +122,32 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
         ),
     }
 
-    # Create model
-    model = SO3LR(**model_params)
-    model = model.to(device)
+    if arch_config.get("multihead", False):
+        model_params["num_output_heads"] = arch_config.get(
+            "num_output_heads", None
+        )
+        assert (
+            model_params["num_output_heads"] is not None
+        ), "num_output_heads must be specified when using multihead"
+        logging.info(
+            f"Creating Multi-Head SO3LR model with {model_params['num_output_heads']} heads"
+        )
+        model = MultiHeadSO3LR(**model_params)
+    else:
+        logging.info(f"Createing SO3LR model")
+        model = SO3LR(**model_params)
 
+    model = model.to(device)
     total_params = sum(p.numel() for p in model.parameters())
-    logging.info(f"Created SO3LR model with {total_params} parameters")
+    logging.info(f"The model has {total_params} parameters")
     return model
 
 
 def select_valid_subset(
     data: list,
     valid_ratio: float,
-    num_train :int = None,
-    num_valid: int = None
+    num_train: int = None,
+    num_valid: int = None,
 ) -> Tuple[list, list]:
     n_valid = int(len(data) * valid_ratio)
     n_train = len(data) - n_valid
@@ -144,7 +156,7 @@ def select_valid_subset(
     if num_valid is not None:
         n_valid = min(n_valid, num_valid)
     random.shuffle(data)
-    
+
     return data[:n_train], data[n_train : n_train + n_valid]
 
 
@@ -162,10 +174,11 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     batch_size = config["TRAINING"]["batch_size"]
     valid_batch_size = config["TRAINING"]["valid_batch_size"]
     r_max_lr = config["TRAINING"].get("neighbors_lr_cutoff", 100.0)
-    
+
     heads = config["TRAINING"].get("heads", None)
     if heads is not None:
-        head_data = []
+        train_data = []
+        val_data = {}
         for head_name, head_config in heads.items():
             head_data = read(head_config["path_to_train_data"], index=":")
             head_valid_path = head_config.get("path_to_val_data", None)
@@ -178,78 +191,98 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
                 head_train_data, head_val_data = select_valid_subset(
                     head_data, valid_ratio, num_train, num_valid
                 )
-            logging.info(f"Head {head_name} - Training set size: {len(head_train_data)}")
-            logging.info(f"Head {head_name} - Validation set size: {len(head_val_data)}")
-            
+            logging.info(
+                f"Head {head_name} - Training set size: {len(head_train_data)}"
+            )
+            logging.info(
+                f"Head {head_name} - Validation set size: {len(head_val_data)}"
+            )
+
             head_config_list_train = create_data_from_list(
                 head_train_data,
                 r_max=model.r_max,
                 r_max_lr=r_max_lr,
                 key_specification=keyspec,
-                head=head_name
+                head=head_name,
             )
-            
-            head_data.extend(head_config_list_train)
-            
-            
-            
+            train_data.extend(head_config_list_train)
 
-            
+            head_config_list_val = create_data_from_list(
+                head_val_data,
+                r_max=model.r_max,
+                r_max_lr=r_max_lr,
+                key_specification=keyspec,
+                head=head_name,
+            )
+            val_data[head_name] = create_dataloader_from_data(
+                head_config_list_val,
+                batch_size=valid_batch_size,
+                shuffle=False,
+            )
 
-    # Load data
-    data_path = config["TRAINING"]["path_to_train_data"]
-    logging.info(f"Loading data from {data_path}")
-    data = read(data_path, index=":")
+        train_loader = create_dataloader_from_data(
+            train_data,
+            batch_size=batch_size,
+            shuffle=True,
+        )
 
-    # Split data
-    val_data_path = config["TRAINING"].get("path_to_val_data")
-    if val_data_path:
-        # Use separate validation file
-        val_data = read(config["TRAINING"]["path_to_val_data"], index=":")
-        train_data = data
+        logging.info(f"Training set size: {len(train_data)}")
+        logging.info(f"Validation set size: {len(val_data)}")
+
+        # Compute average number of neighbors
+        avg_num_neighbors = compute_avg_num_neighbors(train_loader)
+        model.avg_num_neighbors = avg_num_neighbors
+        logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
+        return train_loader, val_data
+
     else:
-        # Split from training data
-        valid_ratio = config["TRAINING"].get("valid_ratio", 0.1)
-        n_valid = int(len(data) * valid_ratio)
-        n_train = len(data) - n_valid
+        # Load data
+        data_path = config["TRAINING"]["path_to_train_data"]
+        logging.info(f"Loading data from {data_path}")
+        data = read(data_path, index=":")
 
-        if "num_train" in config["TRAINING"]:
-            n_train = min(n_train, config["TRAINING"]["num_train"])
-        if "num_valid" in config["TRAINING"]:
-            n_valid = min(n_valid, config["TRAINING"]["num_valid"])
+        # Split data
+        val_data_path = config["TRAINING"].get("path_to_val_data")
+        if val_data_path:
+            val_data = read(val_data_path, index=":")
+            train_data = data
+            logging.info(
+                f"Using separate validation data from {val_data_path}"
+            )
+        else:
+            valid_ratio = config["TRAINING"].get("valid_ratio", 0.1)
+            num_train = config["TRAINING"].get("num_train", None)
+            num_valid = config["TRAINING"].get("num_valid", None)
+            train_data, val_data = select_valid_subset(
+                data, valid_ratio, num_train, num_valid
+            )
+            logging.info(f"Splitting data with validation ratio {valid_ratio}")
 
-        train_data = data[:n_train]
-        val_data = data[n_train : n_train + n_valid]
+        train_loader = create_dataloader_from_list(
+            train_data,
+            batch_size=batch_size,
+            r_max=model.r_max,
+            r_max_lr=r_max_lr,
+            key_specification=keyspec,
+            shuffle=True,
+        )
 
+        valid_loader = create_dataloader_from_list(
+            val_data,
+            batch_size=valid_batch_size,
+            r_max=model.r_max,
+            r_max_lr=r_max_lr,
+            key_specification=keyspec,
+            shuffle=False,
+        )
+        logging.info(f"Training set size: {len(train_data)}")
+        logging.info(f"Validation set size: {len(val_data)}")
 
-    logging.info(f"Training set size: {len(train_data)}")
-    logging.info(f"Validation set size: {len(val_data)}")
-
-
-    train_loader = create_dataloader_from_list(
-        train_data,
-        batch_size=batch_size,
-        r_max=model.r_max,
-        r_max_lr=r_max_lr,
-        key_specification=keyspec,
-        shuffle=True,
-    )
-
-    valid_loader = create_dataloader_from_list(
-        val_data,
-        batch_size=valid_batch_size,
-        r_max=model.r_max,
-        r_max_lr=r_max_lr,
-        key_specification=keyspec,
-        shuffle=False,
-    )
-
-    # Compute average number of neighbors
-    avg_num_neighbors = compute_avg_num_neighbors(train_loader)
-    model.avg_num_neighbors = avg_num_neighbors
-    logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
-
-    return train_loader, {"main": valid_loader}
+        # Compute average number of neighbors
+        avg_num_neighbors = compute_avg_num_neighbors(train_loader)
+        model.avg_num_neighbors = avg_num_neighbors
+        logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
+        return train_loader, {"main": valid_loader}
 
 
 def setup_loss_function(config: dict) -> torch.nn.Module:
@@ -710,19 +743,13 @@ def setup_finetuning(
         )
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train SO3LR model")
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to configuration YAML file",
-    )
-    args = parser.parse_args()
+def run_training(config: dict) -> None:
+    """
+    Execute the complete training pipeline.
 
-    # Load configuration
-    config = setup_config_from_yaml(args.config)
-
+    Args:
+        config: Configuration dictionary containing all training parameters
+    """
     # Setup logging
     setup_logging(config)
 
@@ -864,6 +891,23 @@ def main():
     final_model_path = f'{config["GENERAL"]["name_exp"]}.pth'
     torch.save(model.state_dict(), final_model_path)
     torch.save(model, final_model_path.replace(".pth", ".model"))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Train SO3LR model")
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to configuration YAML file",
+    )
+    args = parser.parse_args()
+
+    # Load configuration
+    config = setup_config_from_yaml(args.config)
+
+    # Run the training pipeline
+    run_training(config)
 
 
 if __name__ == "__main__":
