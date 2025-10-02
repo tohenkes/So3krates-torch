@@ -4,6 +4,8 @@ from so3krates_torch.blocks.so3_conv_invariants import L0Contraction
 import math
 from so3krates_torch.tools import scatter
 
+torch.set_printoptions(precision=8)
+
 
 class FilterNet(torch.nn.Module):
     """
@@ -13,28 +15,28 @@ class FilterNet(torch.nn.Module):
     def __init__(
         self,
         degrees: List[int],
-        num_radial_basis: int,
-        features_dim: int,
+        num_radial_basis_fn: int,
+        num_features: int,
         num_layers: int = 2,
         non_linearity: Type[torch.nn.Module] = torch.nn.SiLU,
     ):
         super().__init__()
 
         assert (
-            features_dim % 4 == 0
-        ), f"features_dim {features_dim} must be divisible by 4 for the EuclideanTransformer."
+            num_features % 4 == 0
+        ), f"num_features {num_features} must be divisible by 4 for the EuclideanTransformer."
 
         self.mlp_rbf = torch.nn.Sequential(
             torch.nn.Linear(
-                in_features=num_radial_basis,
-                out_features=features_dim,
+                in_features=num_radial_basis_fn,
+                out_features=num_features,
             ),
             non_linearity(),
         )
         self.mlp_ev = torch.nn.Sequential(
             torch.nn.Linear(
                 in_features=len(degrees),
-                out_features=features_dim // 4,
+                out_features=num_features // 4,
             ),
             non_linearity(),
         )
@@ -46,8 +48,8 @@ class FilterNet(torch.nn.Module):
                 f"mlp_rbf_layer_{i+1}",
                 torch.nn.Sequential(
                     torch.nn.Linear(
-                        in_features=features_dim,
-                        out_features=features_dim,
+                        in_features=num_features,
+                        out_features=num_features,
                     ),
                     non_linearity(),
                 ),
@@ -57,8 +59,8 @@ class FilterNet(torch.nn.Module):
                     f"mlp_ev_layer_{i+1}",
                     torch.nn.Sequential(
                         torch.nn.Linear(
-                            in_features=features_dim // 4,
-                            out_features=features_dim,
+                            in_features=num_features // 4,
+                            out_features=num_features,
                         ),
                         non_linearity(),
                     ),
@@ -68,8 +70,8 @@ class FilterNet(torch.nn.Module):
                     f"mlp_ev_layer_{i+1}",
                     torch.nn.Sequential(
                         torch.nn.Linear(
-                            in_features=features_dim,
-                            out_features=features_dim,
+                            in_features=num_features,
+                            out_features=num_features,
                         ),
                         non_linearity(),
                     ),
@@ -93,8 +95,8 @@ class EuclideanTransformer(torch.nn.Module):
         self,
         degrees: List[int],
         num_heads: int,
-        features_dim: int,
-        num_radial_basis: int,
+        num_features: int,
+        num_radial_basis_fn: int,
         activation_fn: Type[torch.nn.Module] = torch.nn.SiLU,
         interaction_bias: bool = True,
         message_normalization: str = "sqrt_num_features",
@@ -114,16 +116,16 @@ class EuclideanTransformer(torch.nn.Module):
 
         self.filter_net_inv = FilterNet(
             degrees=degrees,
-            features_dim=features_dim,
-            num_radial_basis=num_radial_basis,
+            num_features=num_features,
+            num_radial_basis_fn=num_radial_basis_fn,
             num_layers=filter_net_inv_layers,
             non_linearity=activation_fn,
         )
 
         self.filter_net_ev = FilterNet(
             degrees=degrees,
-            features_dim=features_dim,
-            num_radial_basis=num_radial_basis,
+            num_features=num_features,
+            num_radial_basis_fn=num_radial_basis_fn,
             num_layers=filter_net_ev_layers,
             non_linearity=activation_fn,
         )
@@ -131,7 +133,7 @@ class EuclideanTransformer(torch.nn.Module):
         self.euclidean_attention_block = EuclideanAttentionBlock(
             degrees=degrees,
             num_heads=num_heads,
-            features_dim=features_dim,
+            num_features=num_features,
             filter_net_inv=self.filter_net_inv,
             filter_net_ev=self.filter_net_ev,
             device=device,
@@ -141,7 +143,7 @@ class EuclideanTransformer(torch.nn.Module):
         )
         self.interaction_block = InteractionBlock(
             degrees=degrees,
-            features_dim=features_dim,
+            num_features=num_features,
             bias=interaction_bias,
             device=device,
         )
@@ -151,13 +153,13 @@ class EuclideanTransformer(torch.nn.Module):
         self.layer_normalization_1 = layer_normalization_1
         if layer_normalization_1:
             self.layer_norm_inv_1 = torch.nn.LayerNorm(
-                normalized_shape=features_dim,
+                normalized_shape=num_features,
                 eps=1e-6,  # flax default is 1e-6 while pytorch default is 1e-5
             )
         self.layer_normalization_2 = layer_normalization_2
         if layer_normalization_2:
             self.layer_norm_inv_2 = torch.nn.LayerNorm(
-                normalized_shape=features_dim,
+                normalized_shape=num_features,
                 eps=1e-6,  # flax default is 1e-6 while pytorch default is 1e-5
             )
 
@@ -166,13 +168,13 @@ class EuclideanTransformer(torch.nn.Module):
             self.mlp_1 = torch.nn.Sequential(
                 activation_fn(),
                 torch.nn.Linear(
-                    in_features=features_dim,
-                    out_features=features_dim,
+                    in_features=num_features,
+                    out_features=num_features,
                 ),
                 activation_fn(),
                 torch.nn.Linear(
-                    in_features=features_dim,
-                    out_features=features_dim,
+                    in_features=num_features,
+                    out_features=num_features,
                 ),
             )
 
@@ -181,13 +183,13 @@ class EuclideanTransformer(torch.nn.Module):
             self.mlp_2 = torch.nn.Sequential(
                 activation_fn(),
                 torch.nn.Linear(
-                    in_features=features_dim,
-                    out_features=features_dim,
+                    in_features=num_features,
+                    out_features=num_features,
                 ),
                 activation_fn(),
                 torch.nn.Linear(
-                    in_features=features_dim,
-                    out_features=features_dim,
+                    in_features=num_features,
+                    out_features=num_features,
                 ),
             )
 
@@ -202,7 +204,6 @@ class EuclideanTransformer(torch.nn.Module):
         cutoffs: torch.Tensor,
         return_att: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-
         att_output = self.euclidean_attention_block(
             inv_features,
             ev_features,
@@ -265,7 +266,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
         self,
         degrees: List[int],
         num_heads: int,
-        features_dim: int,
+        num_features: int,
         filter_net_inv: FilterNet,
         filter_net_ev: FilterNet,
         message_normalization: str = "sqrt_num_features",
@@ -278,14 +279,14 @@ class EuclideanAttentionBlock(torch.nn.Module):
         super().__init__()
         self.degrees = degrees
         self.num_heads = num_heads
-        self.features_dim = features_dim
+        self.num_features = num_features
         self.message_normalization = message_normalization
         self.avg_num_neighbors = avg_num_neighbors
 
         self.ev_features_dim = torch.sum(
             torch.tensor([2 * y + 1 for y in degrees])
         ).item()
-        self.inv_features_dim = features_dim
+        self.inv_features_dim = num_features
         self.so3_conv_invariants = L0Contraction(
             degrees=degrees, device=device
         )
@@ -295,7 +296,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
 
         # query, key, value weights for invariants
         self.inv_heads = num_heads
-        self.inv_head_dim = features_dim // num_heads
+        self.inv_head_dim = num_features // num_heads
         self.W_q_inv = torch.nn.Parameter(
             torch.empty(
                 self.inv_heads,
@@ -323,7 +324,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
         # query, key weights for ev features
         # no value weights, as it uses spherical harmonics as values
         self.ev_heads = len(degrees)
-        self.ev_head_dim = features_dim // len(degrees)
+        self.ev_head_dim = num_features // len(degrees)
         self.W_q_ev = torch.nn.Parameter(
             torch.empty(
                 self.ev_heads,
@@ -410,7 +411,6 @@ class EuclideanAttentionBlock(torch.nn.Module):
                 inv_features_ev.transpose(0, 1), self.W_k_ev
             ).transpose(0, 1)
         )[senders]
-
         return q_inv, k_inv, v_inv, q_ev, k_ev
 
     def forward(
@@ -424,15 +424,14 @@ class EuclideanAttentionBlock(torch.nn.Module):
         cutoffs: torch.Tensor,
         return_att: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-
         inv_features = inv_features.contiguous()
         ev_features = ev_features.contiguous()
         rbf = rbf.contiguous()
-
         ev_differences = ev_features[senders] - ev_features[receivers]
         ev_differences_invariants = self.so3_conv_invariants(ev_differences)
         filter_w_inv = self.filter_net_inv(rbf, ev_differences_invariants)
         filter_w_ev = self.filter_net_ev(rbf, ev_differences_invariants)
+
         # split filter weights into heads
         # now has shape [neighbors, num_heads, inv_head_dim]
         filter_w_inv = filter_w_inv.contiguous().view(
@@ -459,6 +458,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
             receivers=receivers,
             senders=senders,
         )
+        # print(filter_w_inv[0,0,:10])
         # Eq. 21 https://doi.org/10.1038/s41467-024-50620-6
         filtered_k_inv = k_inv * filter_w_inv
         filtered_k_ev = k_ev * filter_w_ev
@@ -471,6 +471,7 @@ class EuclideanAttentionBlock(torch.nn.Module):
 
         # Eq. 15 in https://doi.org/10.1038/s41467-024-50620-6
         scaled_neighbors_inv = cutoffs[:, None] * alpha_inv * v_inv
+
         d_h_att_inv_features = scatter.scatter_sum(
             src=scaled_neighbors_inv,
             index=receivers,
@@ -514,15 +515,15 @@ class InteractionBlock(torch.nn.Module):
     def __init__(
         self,
         degrees: List[int],
-        features_dim: int,
+        num_features: int,
         bias: bool = True,
         device: Union[str, torch.device] = "cpu",
     ):
         super().__init__()
         len_degrees = len(degrees)
         self.linear_layer = torch.nn.Linear(
-            in_features=features_dim + len_degrees,
-            out_features=features_dim + len_degrees,
+            in_features=num_features + len_degrees,
+            out_features=num_features + len_degrees,
             bias=bias,
         )
         self.so3_conv_invariants = L0Contraction(
@@ -569,7 +570,7 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
         self,
         degrees: List[int],
         num_heads: int,
-        features_dim: int,
+        num_features: int,
         filter_net_inv: callable,
         filter_net_ev: callable,
         lora_rank: int = 4,
@@ -585,7 +586,7 @@ class EuclideanAttentionBlockLORA(EuclideanAttentionBlock):
         super().__init__(
             degrees=degrees,
             num_heads=num_heads,
-            features_dim=features_dim,
+            num_features=num_features,
             filter_net_inv=filter_net_inv,
             filter_net_ev=filter_net_ev,
             message_normalization=message_normalization,
@@ -796,7 +797,7 @@ class EuclideanAttentionBlockDoRA(EuclideanAttentionBlockLORA):
         self,
         degrees: List[int],
         num_heads: int,
-        features_dim: int,
+        num_features: int,
         filter_net_inv: callable,
         filter_net_ev: callable,
         lora_rank: int = 4,
@@ -812,7 +813,7 @@ class EuclideanAttentionBlockDoRA(EuclideanAttentionBlockLORA):
         super().__init__(
             degrees=degrees,
             num_heads=num_heads,
-            features_dim=features_dim,
+            num_features=num_features,
             filter_net_inv=filter_net_inv,
             filter_net_ev=filter_net_ev,
             lora_rank=lora_rank,
@@ -926,7 +927,7 @@ class EuclideanAttentionBlockDoRA(EuclideanAttentionBlockLORA):
             )
             v_inv = (
                 lora_v_inv * (self.dora_m_v_inv / self.norm_v_inv)[None, :, :]
-                )[senders]
+            )[senders]
 
             lora_q_ev = self._use_lora(
                 inv_features_ev,
@@ -1027,7 +1028,7 @@ class EuclideanAttentionBlockVeRA(EuclideanAttentionBlockLORA):
         self,
         degrees: List[int],
         num_heads: int,
-        features_dim: int,
+        num_features: int,
         vera_A_matrix_inv: torch.Tensor,
         vera_B_matrix_inv: torch.Tensor,
         vera_A_matrix_ev: torch.Tensor,
@@ -1047,7 +1048,7 @@ class EuclideanAttentionBlockVeRA(EuclideanAttentionBlockLORA):
         super().__init__(
             degrees=degrees,
             num_heads=num_heads,
-            features_dim=features_dim,
+            num_features=num_features,
             filter_net_inv=filter_net_inv,
             filter_net_ev=filter_net_ev,
             lora_rank=lora_rank,
@@ -1244,13 +1245,13 @@ class EuclideanAttentionBlockVeRA(EuclideanAttentionBlockLORA):
             )[senders]
 
             v_inv = self._use_lora(
-                    features=inv_features_inv,
-                    W=self.W_v_inv,
-                    lora_A=self.vera_A_matrix_inv,
-                    lora_B=self.vera_B_matrix_inv,
-                    vera_b=self.b_v_inv,
-                    vera_d=self.d_v_inv,
-                )[senders]
+                features=inv_features_inv,
+                W=self.W_v_inv,
+                lora_A=self.vera_A_matrix_inv,
+                lora_B=self.vera_B_matrix_inv,
+                vera_b=self.b_v_inv,
+                vera_d=self.d_v_inv,
+            )[senders]
 
             q_ev = self.qk_non_linearity(
                 self._use_lora(

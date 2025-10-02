@@ -8,15 +8,15 @@ class GaussianBasis(Module):
     def __init__(
         self,
         r_max: float,
-        num_radial_basis: int,
+        num_radial_basis_fn: int,
         r_0: float = 0.0,
         trainable: bool = False,
     ):
         super().__init__()
         self.r_max = r_max
-        self.num_radial_basis = num_radial_basis
+        self.num_radial_basis_fn = num_radial_basis_fn
 
-        centers = self._init_centers(r_0, r_max, num_radial_basis)
+        centers = self._init_centers(r_0, r_max, num_radial_basis_fn)
         widths = self._init_widths(centers)
 
         if trainable:
@@ -118,7 +118,7 @@ class ComputeRBF(Module):
     def __init__(
         self,
         r_max: float,
-        num_radial_basis: int,
+        num_radial_basis_fn: int,
         trainable: bool = True,
         radial_basis_fn: str = "gaussian",
     ):
@@ -134,18 +134,18 @@ class ComputeRBF(Module):
         if radial_basis_fn == "gaussian":
             self.radial_basis_fn = GaussianBasis(
                 r_max=r_max,
-                num_radial_basis=num_radial_basis,
+                num_radial_basis_fn=num_radial_basis_fn,
                 trainable=trainable,
             )
         elif radial_basis_fn == "bernstein":
             self.radial_basis_fn = BernsteinBasis(
-                n_rbf=num_radial_basis,
+                n_rbf=num_radial_basis_fn,
                 r_cut=r_max,
                 trainable_gamma=trainable,
             )
         elif radial_basis_fn == "bessel":
             self.radial_basis_fn = BesselBasis(
-                n_rbf=num_radial_basis,
+                n_rbf=num_radial_basis_fn,
                 r_cut=r_max,
                 trainable_freqs=trainable,
             )

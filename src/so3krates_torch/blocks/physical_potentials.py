@@ -362,19 +362,19 @@ class CoulombErf(nn.Module):
         *,
         ke: float,
         sigma: float,
-        neighborlist_format: str = "sparse",
+        neighborlist_format_lr: str = "sparse",
     ) -> None:
         super().__init__()
-        if neighborlist_format not in ("sparse", "ordered_sparse"):
+        if neighborlist_format_lr not in ("sparse", "ordered_sparse"):
             raise ValueError(
-                "neighborlist_format must be 'sparse' or 'ordered_sparse'"
+                "neighborlist_format_lr must be 'sparse' or 'ordered_sparse'"
             )
-        c_val = 0.5 if neighborlist_format == "sparse" else 1.0
+        c_val = 0.5 if neighborlist_format_lr == "sparse" else 1.0
         default_dtype = torch.get_default_dtype()
         self.register_buffer("ke", torch.tensor(ke, dtype=default_dtype))
         self.register_buffer("sigma", torch.tensor(sigma, dtype=default_dtype))
         self.register_buffer("c", torch.tensor(c_val, dtype=default_dtype))
-        self.neighborlist_format = neighborlist_format
+        self.neighborlist_format_lr = neighborlist_format_lr
 
     def forward(
         self,
@@ -388,7 +388,6 @@ class CoulombErf(nn.Module):
             q = q.squeeze(-1)
         if rij.dim() == 2 and rij.size(-1) == 1:
             rij = rij.squeeze(-1)
-
         qi = q[receivers]
         qj = q[senders]
 
@@ -410,14 +409,14 @@ class CoulombErfShiftedForceSmooth(nn.Module):
         sigma: float,
         cutoff: float,
         cuton: float,
-        neighborlist_format: str = "sparse",
+        neighborlist_format_lr: str = "sparse",
     ) -> None:
         super().__init__()
-        if neighborlist_format not in ("sparse", "ordered_sparse"):
+        if neighborlist_format_lr not in ("sparse", "ordered_sparse"):
             raise ValueError(
-                "neighborlist_format must be 'sparse' or 'ordered_sparse'"
+                "neighborlist_format_lr must be 'sparse' or 'ordered_sparse'"
             )
-        c_val = 0.5 if neighborlist_format == "sparse" else 1.0
+        c_val = 0.5 if neighborlist_format_lr == "sparse" else 1.0
         default_dtype = torch.get_default_dtype()
         self.register_buffer("ke", torch.tensor(ke, dtype=default_dtype))
         self.register_buffer("sigma", torch.tensor(sigma, dtype=default_dtype))
@@ -426,7 +425,7 @@ class CoulombErfShiftedForceSmooth(nn.Module):
         )
         self.register_buffer("cuton", torch.tensor(cuton, dtype=default_dtype))
         self.register_buffer("c", torch.tensor(c_val, dtype=default_dtype))
-        self.neighborlist_format = neighborlist_format
+        self.neighborlist_format_lr = neighborlist_format_lr
 
     @torch.no_grad()
     def _potential(self, r: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
@@ -467,7 +466,6 @@ class CoulombErfShiftedForceSmooth(nn.Module):
         shifted_potential = (
             pairwise - shift - force_shift * (rij - self.cutoff)
         )
-
         qi = q[receivers]
         qj = q[senders]
 
@@ -609,11 +607,11 @@ class ElectrostaticInteraction(nn.Module):
         self,
         *,
         ke: float = 14.399645351950548,
-        neighborlist_format: str = "sparse",
+        neighborlist_format_lr: str = "sparse",
     ) -> None:
         super().__init__()
         self.ke = ke
-        self.neighborlist_format = neighborlist_format
+        self.neighborlist_format_lr = neighborlist_format_lr
 
     def forward(
         self,
@@ -644,13 +642,13 @@ class ElectrostaticInteraction(nn.Module):
                 sigma=electrostatic_energy_scale,
                 cutoff=float(cutoff_lr),
                 cuton=cuton,
-                neighborlist_format=self.neighborlist_format,
+                neighborlist_format_lr=self.neighborlist_format_lr,
             )
         else:
             self.coulomb = CoulombErf(
                 ke=self.ke,
                 sigma=electrostatic_energy_scale,
-                neighborlist_format=self.neighborlist_format,
+                neighborlist_format_lr=self.neighborlist_format_lr,
             )
         if lengths_lr.dim() == 2 and lengths_lr.size(-1) == 1:
             lengths_lr = lengths_lr.squeeze(-1)
@@ -681,11 +679,11 @@ class DispersionInteraction(nn.Module):
     def __init__(
         self,
         *,
-        neighborlist_format: str = "sparse",
+        neighborlist_format_lr: str = "sparse",
     ) -> None:
         super().__init__()
 
-        self.c = 0.5 if neighborlist_format == "sparse" else 1.0
+        self.c = 0.5 if neighborlist_format_lr == "sparse" else 1.0
 
     def forward(
         self,

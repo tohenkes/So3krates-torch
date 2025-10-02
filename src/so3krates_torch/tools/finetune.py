@@ -6,6 +6,7 @@ from so3krates_torch.blocks.euclidean_transformer import (
     EuclideanAttentionBlockDoRA,
     EuclideanAttentionBlock,
 )
+from so3krates_torch.modules.models import MultiHeadSO3LR
 import math
 
 
@@ -55,7 +56,7 @@ def model_to_lora(
         ):
             degrees = transformer.euclidean_attention_block.degrees
             num_heads = transformer.euclidean_attention_block.num_heads
-            features_dim = transformer.euclidean_attention_block.features_dim
+            num_features = transformer.euclidean_attention_block.num_features
             filter_net_inv = (
                 transformer.euclidean_attention_block.filter_net_inv
             )
@@ -79,7 +80,7 @@ def model_to_lora(
                 lora_attention_block = EuclideanAttentionBlockDoRA(
                     degrees=degrees,
                     num_heads=num_heads,
-                    features_dim=features_dim,
+                    num_features=num_features,
                     filter_net_inv=filter_net_inv,
                     filter_net_ev=filter_net_ev,
                     lora_rank=rank,
@@ -120,7 +121,7 @@ def model_to_lora(
                 lora_attention_block = EuclideanAttentionBlockVeRA(
                     degrees=degrees,
                     num_heads=num_heads,
-                    features_dim=features_dim,
+                    num_features=num_features,
                     vera_A_matrix_inv=vera_A_matrix_inv,
                     vera_B_matrix_inv=vera_B_matrix_inv,
                     vera_A_matrix_ev=vera_A_matrix_ev,
@@ -138,7 +139,7 @@ def model_to_lora(
                 lora_attention_block = EuclideanAttentionBlockLORA(
                     degrees=degrees,
                     num_heads=num_heads,
-                    features_dim=features_dim,
+                    num_features=num_features,
                     filter_net_inv=filter_net_inv,
                     filter_net_ev=filter_net_ev,
                     lora_rank=rank,
@@ -199,7 +200,7 @@ def freeze_model_parameters(
         "last_layer+mlp",
         "qkv+mlp",
         "lora+mlp",
-        ]
+    ]
     if keep_trainable_choice not in possible_choices:
         raise ValueError(
             f"Invalid choice '{keep_trainable_choice}'. Must be one of {possible_choices}."
@@ -215,10 +216,15 @@ def freeze_model_parameters(
     # Determine which transformer layers to keep trainable based on choice
     num_layers = len(model.euclidean_transformers)
 
-    if keep_trainable_choice == "last_layer" or keep_trainable_choice == "last_layer+mlp":
+    if (
+        keep_trainable_choice == "last_layer"
+        or keep_trainable_choice == "last_layer+mlp"
+    ):
         if keep_trainable_choice == "last_layer+mlp":
             # Also keep the MLP part of the last layer trainable
-            keep_trainable.append(f"euclidean_transformers.{num_layers-1}.euclidean_mlp")
+            keep_trainable.append(
+                f"euclidean_transformers.{num_layers-1}.euclidean_mlp"
+            )
         # Keep only the last transformer layer trainable
         keep_trainable.append(f"euclidean_transformers.{num_layers-1}")
 
@@ -231,13 +237,17 @@ def freeze_model_parameters(
         # Keep only the QKV projection layers trainable
         for i in range(num_layers):
             if keep_trainable_choice == "qkv+mlp":
-                keep_trainable.append(f"euclidean_transformers.{i}.euclidean_mlp")
+                keep_trainable.append(
+                    f"euclidean_transformers.{i}.euclidean_mlp"
+                )
             keep_trainable.append(
                 f"euclidean_transformers.{i}.euclidean_attention_block"
             )
-    
-    elif keep_trainable_choice == "lora" or keep_trainable_choice == "lora+mlp":
-        
+
+    elif (
+        keep_trainable_choice == "lora" or keep_trainable_choice == "lora+mlp"
+    ):
+
         # Keep only the LoRA parameters trainable
         for i in range(num_layers):
             if freeze_lora_A:
@@ -248,10 +258,12 @@ def freeze_model_parameters(
                 keep_trainable.append(
                     f"euclidean_transformers.{i}.euclidean_attention_block.lora_"
                 )
-                
+
             if keep_trainable_choice == "lora+mlp":
-                keep_trainable.append(f"euclidean_transformers.{i}.euclidean_mlp")
-     
+                keep_trainable.append(
+                    f"euclidean_transformers.{i}.euclidean_mlp"
+                )
+
     elif keep_trainable_choice == "dora":
         # Keep only the DoRA parameters trainable
         for i in range(num_layers):
@@ -283,7 +295,6 @@ def freeze_model_parameters(
                 f"euclidean_transformers.{i}.euclidean_attention_block.b_v_"
             )
 
-    
     # Handle optional components based on freeze flags
     if not freeze_shifts:
         keep_trainable.append("atomic_energy_output_block.energy_shifts")
@@ -325,3 +336,20 @@ def freeze_model_parameters(
             if keep_key in name:
                 param.requires_grad = True
                 break  # Found match, no need to check other keys
+
+
+def model_to_multihead(
+    model,
+    settings: dict,
+    num_output_heads: int,
+    device: str = "cpu",
+):
+
+    mh_model = MultiHeadSO3LR(num_output_heads=num_output_heads, **settings)
+    mh_model.load_state_dict(
+        model.state_dict(),
+        strict=False,  # Allow missing keys for new output heads
+    )
+    model = mh_model.to(device)
+
+    return model

@@ -27,6 +27,7 @@ from so3krates_torch.tools.finetune import (
     freeze_model_parameters,
     model_to_lora,
     fuse_lora_weights,
+    model_to_multihead,
 )
 import os
 
@@ -56,21 +57,21 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
     model_params = {
         # Base So3krates parameters
         "r_max": arch_config.get("cutoff", 4.5),  # cutoff -> r_max
-        "num_radial_basis": arch_config.get("num_radial_basis_fn", 32),
+        "num_radial_basis_fn": arch_config.get("num_radial_basis_fn", 32),
         "degrees": arch_config["degrees"],
-        "features_dim": arch_config.get("num_features", 128),
-        "num_att_heads": arch_config.get("num_heads", 4),
-        "num_interactions": arch_config.get("num_layers", 3),
+        "num_features": arch_config.get("num_features", 128),
+        "num_heads": arch_config.get("num_heads", 4),
+        "num_layers": arch_config.get("num_layers", 3),
         "num_elements": 118,  # Default for periodic table
         "energy_regression_dim": arch_config.get("energy_regression_dim", 128),
         "message_normalization": arch_config.get(
             "message_normalization", "avg_num_neighbors"
         ),
         "radial_basis_fn": arch_config.get("radial_basis_fn", "bernstein"),
-        "learn_atomic_type_shifts": arch_config.get(
+        "energy_learn_atomic_type_shifts": arch_config.get(
             "energy_learn_atomic_type_shifts", False
         ),
-        "learn_atomic_type_scales": arch_config.get(
+        "energy_learn_atomic_type_scales": arch_config.get(
             "energy_learn_atomic_type_scales", False
         ),
         "layer_normalization_1": arch_config.get(
@@ -117,7 +118,7 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
             "dispersion_energy_cutoff_lr_damping"
         ),
         "r_max_lr": config["ARCHITECTURE"].get("cutoff_lr", None),
-        "neighborlist_format": arch_config.get(
+        "neighborlist_format_lr": arch_config.get(
             "neighborlist_format_lr", "sparse"
         ),
     }
@@ -509,10 +510,10 @@ def load_pretrained_model_direct(
         # Log some key model attributes for debugging
         if hasattr(model, "r_max"):
             logging.info(f"Model r_max: {model.r_max}")
-        if hasattr(model, "features_dim"):
-            logging.info(f"Model features_dim: {model.features_dim}")
-        if hasattr(model, "num_interactions"):
-            logging.info(f"Model num_interactions: {model.num_interactions}")
+        if hasattr(model, "num_features"):
+            logging.info(f"Model num_features: {model.num_features}")
+        if hasattr(model, "num_layers"):
+            logging.info(f"Model num_layers: {model.num_layers}")
 
         return model
     else:
@@ -667,6 +668,41 @@ def load_checkpoint_if_exists(
         return 0
 
 
+def pretrained_to_mh_model(
+    config: dict,
+    model: torch.nn.Module,
+    device_name: str,
+) -> None:
+
+    if config["ARCHITECTURE"].get("multihead", False):
+        logging.info("Converting pretrained model to multi-head format")
+        num_output_heads = config["ARCHITECTURE"].get("num_output_heads", None)
+        assert (
+            num_output_heads is not None
+        ), "num_output_heads must be specified for multi-head model"
+
+        assert (
+            config.get("ARCHITECTURE") is not None
+        ), "ARCHITECTURE settings must be provided in config"
+
+        exclude = [
+            "multihead",
+            "num_output_heads",
+            "cutoff_lr",
+        ]
+        settings = {
+            k: v for k, v in config["ARCHITECTURE"].items() if k not in exclude
+        }
+        settings["dtype"] = config["GENERAL"].get("default_dtype", "float32")
+        model = model_to_multihead(
+            model,
+            settings,
+            num_output_heads=num_output_heads,
+            device=device_name,
+        )
+    return model
+
+
 def setup_finetuning(
     config: dict, model: torch.nn.Module, device_name: str
 ) -> None:
@@ -681,7 +717,11 @@ def setup_finetuning(
             "Finetuning requires a pretrained model. "
             "Please provide 'pretrained_weights' or 'pretrained_model' in the config."
         )
+
         logging.info(f"Setting up finetuning with choice: {choice}")
+
+        # convert to multi-head if specified (check inside function)
+        model = pretrained_to_mh_model(config, model, device_name)
 
         lora_rank = config["TRAINING"].get("lora_rank", 4)
         lora_alpha = config["TRAINING"].get("lora_alpha", 2.0 * lora_rank)
@@ -739,6 +779,7 @@ def setup_finetuning(
         logging.info(
             f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
         )
+    return model
 
 
 def run_training(config: dict) -> None:
@@ -799,7 +840,7 @@ def run_training(config: dict) -> None:
             warm_start = True
 
     # Setup finetuning if specified
-    setup_finetuning(config, model, device_name)
+    model = setup_finetuning(config, model, device_name)
 
     # Setup data loaders
     train_loader, valid_loaders, avg_num_neighbors = setup_data_loaders(
@@ -914,6 +955,7 @@ def run_training(config: dict) -> None:
 
     # save the model in the working directory
     final_model_path = f'{config["GENERAL"]["name_exp"]}.pth'
+
     torch.save(model.state_dict(), final_model_path)
     torch.save(model, final_model_path.replace(".pth", ".model"))
 

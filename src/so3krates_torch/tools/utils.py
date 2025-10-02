@@ -468,6 +468,7 @@ def ensemble_from_folder(path_to_models: str, device: str, dtype: str) -> dict:
             ensemble[filename_without_suffix] = model
     return ensemble
 
+
 def create_data_from_list(
     atoms_list: list,
     r_max: float,
@@ -476,7 +477,7 @@ def create_data_from_list(
     key_specification: mace_data.utils.KeySpecification = mace_data.utils.KeySpecification(),
     z_table: utils.AtomicNumberTable = None,
 ):
-    
+
     configs = [
         mace_data.config_from_atoms(atoms, key_specification=key_specification)
         for atoms in atoms_list
@@ -484,16 +485,16 @@ def create_data_from_list(
     if z_table is None:
         z_table = utils.AtomicNumberTable([int(z) for z in range(1, 119)])
     return [
-            So3Data.from_config(
-                config,
-                z_table=z_table,
-                cutoff=float(r_max),
-                cutoff_lr=r_max_lr,
-                head=head,
-            )
-            for config in configs
-        ]
-    
+        So3Data.from_config(
+            config,
+            z_table=z_table,
+            cutoff=float(r_max),
+            cutoff_lr=r_max_lr,
+            head=head,
+        )
+        for config in configs
+    ]
+
 
 def create_dataloader_from_list(
     atoms_list: list,
@@ -520,6 +521,7 @@ def create_dataloader_from_list(
         drop_last=drop_last,
     )
     return data_loader
+
 
 def create_dataloader_from_data(
     config_list: list,

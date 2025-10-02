@@ -47,8 +47,8 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
     layer_norm_2 = cfg.model.layer_normalization_2
     residual_mlp_1 = cfg.model.residual_mlp_1
     residual_mlp_2 = cfg.model.residual_mlp_2
-    learn_atomic_type_shifts = cfg.model.energy_learn_atomic_type_shifts
-    learn_atomic_type_scales = cfg.model.energy_learn_atomic_type_scales
+    energy_learn_atomic_type_shifts = cfg.model.energy_learn_atomic_type_shifts
+    energy_learn_atomic_type_scales = cfg.model.energy_learn_atomic_type_scales
     use_charge_embed = cfg.model.use_charge_embed
     use_spin_embed = cfg.model.use_spin_embed
     use_zbl = cfg.model.zbl_repulsion_bool
@@ -275,11 +275,11 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
     mapping["params/observables_0/energy_dense_final/bias"] = (
         "atomic_energy_output_block.final_layer.bias"
     )
-    if learn_atomic_type_shifts:
+    if energy_learn_atomic_type_shifts:
         mapping["params/observables_0/energy_offset"] = (
             "atomic_energy_output_block.energy_shifts.weight"
         )
-    if learn_atomic_type_scales:
+    if energy_learn_atomic_type_scales:
         mapping["params/observables_0/atomic_scales"] = (
             "atomic_energy_output_block.energy_scales.weight"
         )
@@ -349,11 +349,11 @@ def get_model_settings_flax_to_torch(
     return dict(
         r_max=cfg.model.cutoff,
         r_max_lr=cfg.model.cutoff_lr,
-        num_radial_basis=cfg.model.num_radial_basis_fn,
+        num_radial_basis_fn=cfg.model.num_radial_basis_fn,
         degrees=cfg.model.degrees,
-        features_dim=cfg.model.num_features,
-        num_att_heads=cfg.model.num_heads,
-        num_interactions=cfg.model.num_layers,
+        num_features=cfg.model.num_features,
+        num_heads=cfg.model.num_heads,
+        num_layers=cfg.model.num_layers,
         num_elements=num_elements,
         avg_num_neighbors=cfg.data.avg_num_neighbors,
         cutoff_fn=cfg.model.cutoff_fn,
@@ -365,8 +365,8 @@ def get_model_settings_flax_to_torch(
         atomic_type_shifts=(
             cfg.data.energy_shifts.to_dict() if use_defined_shifts else None
         ),
-        learn_atomic_type_shifts=cfg.model.energy_learn_atomic_type_shifts,
-        learn_atomic_type_scales=cfg.model.energy_learn_atomic_type_scales,
+        energy_learn_atomic_type_shifts=cfg.model.energy_learn_atomic_type_shifts,
+        energy_learn_atomic_type_scales=cfg.model.energy_learn_atomic_type_scales,
         energy_regression_dim=cfg.model.energy_regression_dim,
         layer_normalization_1=cfg.model.layer_normalization_1,
         layer_normalization_2=cfg.model.layer_normalization_2,
@@ -505,8 +505,8 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
     layer_norm_2 = cfg.model.layer_normalization_2
     residual_mlp_1 = cfg.model.residual_mlp_1
     residual_mlp_2 = cfg.model.residual_mlp_2
-    learn_atomic_type_shifts = cfg.model.energy_learn_atomic_type_shifts
-    learn_atomic_type_scales = cfg.model.energy_learn_atomic_type_scales
+    energy_learn_atomic_type_shifts = cfg.model.energy_learn_atomic_type_shifts
+    energy_learn_atomic_type_scales = cfg.model.energy_learn_atomic_type_scales
     use_charge_embed = cfg.model.use_charge_embed
     use_spin_embed = cfg.model.use_spin_embed
     use_zbl = cfg.model.zbl_repulsion_bool
@@ -734,11 +734,11 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
     mapping["atomic_energy_output_block.final_layer.bias"] = (
         "params/observables_0/energy_dense_final/bias"
     )
-    if learn_atomic_type_shifts:
+    if energy_learn_atomic_type_shifts:
         mapping["atomic_energy_output_block.energy_shifts.weight"] = (
             "params/observables_0/energy_offset"
         )
-    if learn_atomic_type_scales:
+    if energy_learn_atomic_type_scales:
         mapping["atomic_energy_output_block.energy_scales.weight"] = (
             "params/observables_0/atomic_scales"
         )
@@ -810,11 +810,11 @@ def get_model_settings_torch_to_flax(
     cfg.model.cutoff_lr = torch_settings.get(
         "r_max_lr", torch_settings["r_max"]
     )
-    cfg.model.num_radial_basis_fn = torch_settings["num_radial_basis"]
+    cfg.model.num_radial_basis_fn = torch_settings["num_radial_basis_fn"]
     cfg.model.degrees = torch_settings["degrees"]
-    cfg.model.num_features = torch_settings["features_dim"]
-    cfg.model.num_heads = torch_settings["num_att_heads"]
-    cfg.model.num_layers = torch_settings["num_interactions"]
+    cfg.model.num_features = torch_settings["num_features"]
+    cfg.model.num_heads = torch_settings["num_heads"]
+    cfg.model.num_layers = torch_settings["num_layers"]
     cfg.model.cutoff_fn = torch_settings.get("cutoff_fn", "cosine")
     cfg.model.radial_basis_fn = torch_settings.get(
         "radial_basis_fn", "gaussian"
@@ -823,10 +823,10 @@ def get_model_settings_torch_to_flax(
         "message_normalization", "sqrt_num_features"
     )
     cfg.model.energy_learn_atomic_type_shifts = torch_settings.get(
-        "learn_atomic_type_shifts", False
+        "energy_learn_atomic_type_shifts", False
     )
     cfg.model.energy_learn_atomic_type_scales = torch_settings.get(
-        "learn_atomic_type_scales", False
+        "energy_learn_atomic_type_scales", False
     )
     cfg.model.energy_regression_dim = torch_settings.get(
         "energy_regression_dim", None
