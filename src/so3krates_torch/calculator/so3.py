@@ -151,8 +151,7 @@ class TorchkratesCalculator(Calculator):
 
         for model in self.models:
             model.to(device)
-
-        r_maxs = [model.r_max.cpu() for model in self.models]
+        r_maxs = [model.r_max for model in self.models]
         r_maxs = np.array(r_maxs)
         if not np.all(r_maxs == r_maxs[0]):
             raise ValueError(
