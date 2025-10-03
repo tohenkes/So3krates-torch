@@ -63,7 +63,7 @@ class TorchkratesCalculator(Calculator):
                 "dipole": "REF_dipole",
                 "polarizability": "REF_polarizability",
                 "head": "REF_head",
-                "total_charge": "total_charge",
+                "total_charge": "charge",
                 "total_spin": "total_spin",
             }
 

@@ -81,10 +81,22 @@ def main():
         "--charges_key", type=str, help="Charges key", default="REF_charges"
     )
     parser.add_argument(
+        "--total_charge_key", type=str, help="Total charge key", default="charge"
+    )
+    parser.add_argument(
+        "--total_spin_key", type=str, help="Total spin key", default="total_spin"
+    )
+    parser.add_argument(
         "--hirshfeld_key",
         type=str,
         help="Hirshfeld key",
         default="REF_hirsh_ratios",
+    )
+    parser.add_argument(
+        "--head_key", type=str, help="Head key", default="head"
+    )
+    parser.add_argument(#
+        "--head", type=str, help="Head key", default="head"
     )
 
     args = parser.parse_args()
@@ -146,6 +158,11 @@ def main():
         virials_key=args.virials_key,
         dipole_key=args.dipole_key,
         charges_key=args.charges_key,
+        total_charge_key=args.total_charge_key,
+        total_spin_key=args.total_spin_key,
+        hirshfeld_key=args.hirshfeld_key,
+        head=args.head,
+        head_key=args.head_key,
         r_max_lr=args.r_max_lr,
         log=True,  # Enable logging for detailed output
     )

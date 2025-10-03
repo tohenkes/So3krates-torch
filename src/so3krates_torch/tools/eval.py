@@ -33,6 +33,7 @@ def evaluate_model(
     compute_partial_charges: bool = False,
     return_att: bool = False,
     dtype: str = "float64",
+    key_spec: Optional[mace_data.utils.KeySpecification] = None,
 ) -> dict[str, Union[np.ndarray, List[np.ndarray]]]:
     """
     Evaluate a model on a list of ASE atoms objects.
@@ -87,7 +88,9 @@ def evaluate_model(
         "so3krates",
         "mace",
     ], f"Unknown model type: {model_type}"
-
+    key_spec = mace_data.utils.KeySpecification(
+        ) if key_spec is None else key_spec
+    
     data_loader = create_dataloader_from_list(
         atoms_list=atoms_list,
         batch_size=batch_size,
@@ -95,6 +98,7 @@ def evaluate_model(
         r_max_lr=r_max_lr,
         shuffle=False,
         drop_last=False,
+        key_specification=key_spec,
     )
 
     # Collect data
@@ -245,6 +249,7 @@ def ensemble_prediction(
     compute_hirshfeld: bool = False,
     compute_dipole: bool = False,
     compute_partial_charges: bool = False,
+    key_spec: Optional[mace_data.utils.KeySpecification] = None,
 ) -> np.array:
     """
     Generate ensemble predictions for a list of ASE atoms objects using
@@ -308,7 +313,8 @@ def ensemble_prediction(
         all_dipoles = []
     if compute_partial_charges:
         all_partial_charges = []
-
+    key_spec = mace_data.utils.KeySpecification(
+        ) if key_spec is None else key_spec
     i = 0
     for model in models:
         results = evaluate_model(
@@ -325,6 +331,8 @@ def ensemble_prediction(
             compute_dipole=compute_dipole,
             compute_partial_charges=compute_partial_charges,
             dtype=dtype,
+            key_spec=key_spec,
+            
         )
         all_forces.append(results["forces"])
         all_energies.append(results["energies"])
@@ -641,6 +649,7 @@ def test_ensemble(
     device: str,
     path_to_data: str = None,
     atoms_list: list = None,
+    head: str = "head",
     logger: MetricsLogger = None,
     log_errors: str = "PerAtomMAE",
     return_predictions: bool = False,
@@ -651,6 +660,9 @@ def test_ensemble(
     dipole_key: str = "REF_dipole",
     hirshfeld_key: str = "REF_hirsh_ratios",
     charges_key: str = "REF_charges",
+    total_charge_key: str = "charge",
+    total_spin_key: str = "spin",
+    head_key: str = "head",
     r_max_lr: float = 12.0,
     log: bool = False,
 ) -> Tuple[dict, dict]:
@@ -711,6 +723,9 @@ def test_ensemble(
         info_keys={
             "energy": energy_key,
             "dipole": dipole_key,
+            "total_charge": total_charge_key,
+            "total_spin": total_spin_key,
+            "head": head_key,
         },
         arrays_keys={
             "forces": forces_key,
@@ -729,10 +744,11 @@ def test_ensemble(
         atoms_list=data_to_use,
         batch_size=batch_size,
         r_max=reference_model.r_max,
-        r_max_lr=10e5 if r_max_lr is None else r_max_lr,
+        r_max_lr=10e3 if r_max_lr is None else r_max_lr,
         key_specification=keyspec,
         shuffle=False,
         drop_last=False,
+        head=head,
     )
 
     ensemble_metrics = {}
