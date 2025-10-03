@@ -243,7 +243,7 @@ class So3krates(torch.nn.Module):
         self.interaction_kwargs = self.ctx.interaction_kwargs
         self.lammps_natoms = self.interaction_kwargs.lammps_natoms
         self.lammps_class = self.interaction_kwargs.lammps_class
-        self.senders, self.receivers = (
+        self.receivers, self.senders = (
             data["edge_index"][0],
             data["edge_index"][1],
         )
@@ -500,7 +500,7 @@ class SO3LR(So3krates):
             atomic_numbers=data["atomic_numbers"],
         )
         if self.use_lr:
-            self.senders_lr, self.receivers_lr = (
+            self.receivers_lr, self.senders_lr = (
                 data["edge_index_lr"][0],
                 data["edge_index_lr"][1],
             )
