@@ -775,6 +775,7 @@ class MultiHeadSO3LR(SO3LR):
             num_elements=self.num_elements,
             num_output_heads=self.num_output_heads,
         )
+        self.select_heads = False
 
     def _get_outputs(
         self,
@@ -828,7 +829,7 @@ class MultiHeadSO3LR(SO3LR):
             atomic_energies += dispersion_energies.unsqueeze(-1)
         return atomic_energies
 
-    def _select_heads_training(self, output_dict: dict) -> dict:
+    def _select_heads(self, output_dict: dict) -> dict:
 
         output_dict["energy"] = torch.diagonal(
             output_dict["energy"][self.head_idxs]
@@ -880,6 +881,6 @@ class MultiHeadSO3LR(SO3LR):
             "inv_features": inv_features,
             "att_scores": att_scores,
         }
-        if training:
-            output_dict = self._select_heads_training(output_dict)
+        if self.select_heads:
+            output_dict = self._select_heads(output_dict)
         return output_dict

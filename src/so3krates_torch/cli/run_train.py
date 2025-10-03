@@ -695,8 +695,8 @@ def pretrained_to_mh_model(
         }
         settings["dtype"] = config["GENERAL"].get("default_dtype", "float32")
         model = model_to_multihead(
-            model,
-            settings,
+            model=model,
+            settings=settings,
             num_output_heads=num_output_heads,
             device=device_name,
         )
@@ -911,6 +911,10 @@ def run_training(config: dict) -> None:
     # Get error logging type
     log_errors = config["MISC"].get("error_table", "PerAtomMAE")
 
+    if config["ARCHITECTURE"].get("multihead", False):
+        logging.info("Enabling head selection for multi-head model during training.")
+        model.select_heads = True
+
     logging.info("Starting training loop...")
     # Start training
     train(
@@ -941,6 +945,10 @@ def run_training(config: dict) -> None:
         rank=0,
     )
     logging.info("Training completed successfully!")
+    
+    if config["ARCHITECTURE"].get("multihead", False):
+        logging.info("Disabling head selection for multi-head model after training.")
+        model.select_heads = False
 
     # TODO: fuse model weights if using LoRA before saving
     if config["TRAINING"].get("finetune_choice", None) in [

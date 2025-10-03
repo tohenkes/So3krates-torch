@@ -340,11 +340,10 @@ def freeze_model_parameters(
 
 def model_to_multihead(
     model,
-    settings: dict,
     num_output_heads: int,
+    settings: dict,
     device: str = "cpu",
 ):
-
     mh_model = MultiHeadSO3LR(num_output_heads=num_output_heads, **settings)
     mh_model.load_state_dict(
         model.state_dict(),
