@@ -185,6 +185,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
             head_valid_path = head_config.get("path_to_val_data", None)
             if head_valid_path:
                 head_val_data = read(head_valid_path, index=":")
+                head_train_data = head_data
             else:
                 valid_ratio = head_config.get("valid_ratio", 0.1)
                 num_train = head_config.get("num_train", None)
@@ -673,7 +674,6 @@ def pretrained_to_mh_model(
     model: torch.nn.Module,
     device_name: str,
 ) -> None:
-
     if config["ARCHITECTURE"].get("multihead", False):
         logging.info("Converting pretrained model to multi-head format")
         num_output_heads = config["ARCHITECTURE"].get("num_output_heads", None)
@@ -912,7 +912,9 @@ def run_training(config: dict) -> None:
     log_errors = config["MISC"].get("error_table", "PerAtomMAE")
 
     if config["ARCHITECTURE"].get("multihead", False):
-        logging.info("Enabling head selection for multi-head model during training.")
+        logging.info(
+            "Enabling head selection for multi-head model during training."
+        )
         model.select_heads = True
 
     logging.info("Starting training loop...")
@@ -945,9 +947,11 @@ def run_training(config: dict) -> None:
         rank=0,
     )
     logging.info("Training completed successfully!")
-    
+
     if config["ARCHITECTURE"].get("multihead", False):
-        logging.info("Disabling head selection for multi-head model after training.")
+        logging.info(
+            "Disabling head selection for multi-head model after training."
+        )
         model.select_heads = False
 
     # TODO: fuse model weights if using LoRA before saving
