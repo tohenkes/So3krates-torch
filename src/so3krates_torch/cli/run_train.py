@@ -694,6 +694,7 @@ def pretrained_to_mh_model(
             k: v for k, v in config["ARCHITECTURE"].items() if k not in exclude
         }
         settings["dtype"] = config["GENERAL"].get("default_dtype", "float32")
+        settings["device"] = device_name
         model = model_to_multihead(
             model=model,
             settings=settings,
