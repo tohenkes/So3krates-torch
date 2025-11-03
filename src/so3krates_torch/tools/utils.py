@@ -297,6 +297,7 @@ def save_results_hdf5(results, filename, is_ensemble: bool = False):
         for k, v in results.items():
             if v is not None:
                 if k == "att_scores":
+                    continue
                     # Special handling for attention scores
                     if is_ensemble:
                         # Ensemble attention scores: list of lists of dicts

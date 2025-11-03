@@ -76,7 +76,7 @@ def main():
         "--head", type=str, help="Head key", default="head"
     )
     argparser.add_argument("--dtype", type=str, default="float32")
-    argparser.add_argument("--return_att", action="store_true", default=False)
+    argparser.add_argument("--return_att", action="store_true")
     args = argparser.parse_args()
 
     # check if path ends with .model or is dir
@@ -90,6 +90,7 @@ def main():
         model = torch.load(
             model_path, map_location=args.device, weights_only=False
         )
+        model.return_mean = False
         models.append(model)
 
     data = read(args.data_path, index=":")
@@ -127,7 +128,7 @@ def main():
             compute_hirshfeld=args.compute_hirshfeld,
             compute_partial_charges=args.compute_partial_charges,
             return_att=args.return_att,
-            keyspec=keyspec,
+            key_spec=keyspec,
         )
     else:
         result = ensemble_prediction(
