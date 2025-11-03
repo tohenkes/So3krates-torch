@@ -205,7 +205,8 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
                 r_max=model.r_max,
                 r_max_lr=r_max_lr,
                 key_specification=keyspec,
-                head=head_name,
+                head_name=head_name,
+                all_heads=list(heads.keys())
             )
             train_data.extend(head_config_list_train)
 
@@ -214,7 +215,8 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
                 r_max=model.r_max,
                 r_max_lr=r_max_lr,
                 key_specification=keyspec,
-                head=head_name,
+                head_name=head_name,
+                all_heads=list(heads.keys())
             )
             val_data[head_name] = create_dataloader_from_data(
                 head_config_list_val,
@@ -226,7 +228,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
             train_data,
             batch_size=batch_size,
             shuffle=True,
-        )
+        )   
 
         logging.info(f"Training set size: {len(train_data)}")
         logging.info(f"Validation set size: {len(val_data)}")

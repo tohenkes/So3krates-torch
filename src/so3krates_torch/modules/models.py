@@ -831,7 +831,7 @@ class MultiHeadSO3LR(SO3LR):
         return atomic_energies
 
     def _select_heads(self, output_dict: dict) -> dict:
-
+        
         output_dict["energy"] = torch.diagonal(
             output_dict["energy"][self.head_idxs]
         )

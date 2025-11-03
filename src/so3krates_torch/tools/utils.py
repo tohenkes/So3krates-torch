@@ -473,13 +473,18 @@ def create_data_from_list(
     atoms_list: list,
     r_max: float,
     r_max_lr: float,
-    head: str = None,
+    head_name: str = None,
+    all_heads: list = None,
     key_specification: mace_data.utils.KeySpecification = mace_data.utils.KeySpecification(),
     z_table: utils.AtomicNumberTable = None,
 ):
 
     configs = [
-        mace_data.config_from_atoms(atoms, key_specification=key_specification)
+        mace_data.config_from_atoms(
+            atoms, 
+            key_specification=key_specification,
+            head_name=head_name
+            )
         for atoms in atoms_list
     ]
     if z_table is None:
@@ -490,7 +495,7 @@ def create_data_from_list(
             z_table=z_table,
             cutoff=float(r_max),
             cutoff_lr=r_max_lr,
-            head=head,
+            heads=all_heads,
         )
         for config in configs
     ]
