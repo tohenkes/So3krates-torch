@@ -93,9 +93,15 @@ def main():
         default="REF_hirsh_ratios",
     )
     parser.add_argument(
+        "--multihead_model", action="store_true", help="Multihead model"
+    )
+    parser.add_argument(
+        "--multihead_return_mean", action="store_true", help="Multihead return mean"
+    )
+    parser.add_argument(
         "--head_key", type=str, help="Head key", default="head"
     )
-    parser.add_argument(#
+    parser.add_argument(
         "--head", type=str, help="Head key", default="head"
     )
 
@@ -114,6 +120,13 @@ def main():
             model.dispersion_energy_cutoff_lr_damping = (
                 args.dispersion_energy_cutoff_lr_damping
             )
+        if args.multihead_model and not args.multihead_return_mean:
+            model.select_heads = True
+            logging.info("Multihead model: Selecting heads.")
+        elif args.multihead_model and args.multihead_return_mean:
+            model.select_heads = False
+            model.return_mean = True
+            logging.info("Multihead model: Returning mean over heads.")
 
     possible_args = [
         "energy",

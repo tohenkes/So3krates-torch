@@ -22,6 +22,9 @@ def main():
         "--multispecies", action="store_true", default=False
     )
     argparser.add_argument(
+        "--multihead_model", action="store_true", default=False
+    )
+    argparser.add_argument(
         "--compute_dipole", action="store_true", default=False
     )
     argparser.add_argument(
@@ -114,6 +117,7 @@ def main():
             batch_size=args.batch_size,
             device=args.device,
             model_type=args.model_type,
+            multihead_model=args.multihead_model,
             r_max_lr=args.r_max_lr,
             dispersion_energy_cutoff_lr_damping=args.dispersion_energy_cutoff_lr_damping,
             dtype=args.dtype,

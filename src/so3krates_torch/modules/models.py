@@ -776,6 +776,7 @@ class MultiHeadSO3LR(SO3LR):
             num_output_heads=self.num_output_heads,
         )
         self.select_heads = False
+        self.return_mean = False
 
     def _get_outputs(
         self,
@@ -864,6 +865,7 @@ class MultiHeadSO3LR(SO3LR):
         training: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
 
+        
         # total_energy has shape (num_graphs, num_output_heads)
         # permute to shape (num_output_heads, num_graphs)
         total_energy = total_energy.permute(1, 0)
@@ -882,5 +884,22 @@ class MultiHeadSO3LR(SO3LR):
             "att_scores": att_scores,
         }
         if self.select_heads:
+            assert not self.return_mean, (
+                "Cannot both select heads and return mean."
+            )
             output_dict = self._select_heads(output_dict)
+            
+        if self.return_mean:
+            mean_properties = [
+                "energy",
+                "forces",
+                "virials",
+                "stress",
+                "hessian",
+                "edge_forces",
+            ]
+            for k, v in output_dict.items():
+                if v is not None and k in mean_properties:
+                    output_dict[k] = v.mean(dim=0)
+            
         return output_dict

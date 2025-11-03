@@ -26,6 +26,7 @@ def evaluate_model(
     model_type: str,
     r_max_lr: float = 12.0,
     multi_species: bool = False,
+    multihead_model: bool = False,
     dispersion_energy_cutoff_lr_damping: Optional[float] = None,
     compute_stress: bool = False,
     compute_hirshfeld: bool = False,
@@ -193,7 +194,7 @@ def evaluate_model(
         forces = [force for force in forces]
         forces_list += forces
 
-    if multi_species:
+    if multi_species or multihead_model:
         energies = energies_list
         forces = forces_list
         if compute_stress:
@@ -243,6 +244,7 @@ def ensemble_prediction(
     dtype: str = "float64",
     batch_size: int = 1,
     multi_species: bool = False,
+    multihead_model: bool = False,
     r_max_lr: float = 12.0,
     dispersion_energy_cutoff_lr_damping: Optional[float] = None,
     compute_stress: bool = False,
@@ -346,7 +348,7 @@ def ensemble_prediction(
             all_partial_charges.append(results["partial_charges"])
         i += 1
 
-    if not multi_species:
+    if not multi_species and not multihead_model:
         # Stack for fixed-size molecules
         all_forces = np.stack(all_forces).reshape(
             (len(models), len(atoms_list), -1, 3)
