@@ -209,7 +209,13 @@ def freeze_model_parameters(
     keep_trainable = []
 
     # keep output heads trainable (energy, forces, etc.)
-    if keep_trainable_choice not in ["lora", "dora", "vera"]:
+    if keep_trainable_choice in [
+        "last_layer+mlp",
+        "qkv+mlp",
+        "mlp",
+        "lora+mlp",
+        "last_layer"
+    ]:
         keep_trainable.append("atomic_energy_output_block.layers")
         keep_trainable.append("atomic_energy_output_block.final_layer")
 
@@ -220,26 +226,12 @@ def freeze_model_parameters(
         keep_trainable_choice == "last_layer"
         or keep_trainable_choice == "last_layer+mlp"
     ):
-        if keep_trainable_choice == "last_layer+mlp":
-            # Also keep the MLP part of the last layer trainable
-            keep_trainable.append(
-                f"euclidean_transformers.{num_layers-1}.euclidean_mlp"
-            )
         # Keep only the last transformer layer trainable
         keep_trainable.append(f"euclidean_transformers.{num_layers-1}")
-
-    elif keep_trainable_choice == "mlp":
-        # Keep only the MLP parts of all layers trainable (not attention)
-        for i in range(num_layers):
-            keep_trainable.append(f"euclidean_transformers.{i}.euclidean_mlp")
 
     elif keep_trainable_choice == "qkv" or keep_trainable_choice == "qkv+mlp":
         # Keep only the QKV projection layers trainable
         for i in range(num_layers):
-            if keep_trainable_choice == "qkv+mlp":
-                keep_trainable.append(
-                    f"euclidean_transformers.{i}.euclidean_mlp"
-                )
             keep_trainable.append(
                 f"euclidean_transformers.{i}.euclidean_attention_block"
             )
@@ -257,11 +249,6 @@ def freeze_model_parameters(
             else:
                 keep_trainable.append(
                     f"euclidean_transformers.{i}.euclidean_attention_block.lora_"
-                )
-
-            if keep_trainable_choice == "lora+mlp":
-                keep_trainable.append(
-                    f"euclidean_transformers.{i}.euclidean_mlp"
                 )
 
     elif keep_trainable_choice == "dora":
@@ -329,7 +316,7 @@ def freeze_model_parameters(
     # First, freeze all parameters
     for param in model.parameters():
         param.requires_grad = False
-
+        
     # Then unfreeze only the specified ones
     for name, param in model.named_parameters():
         for keep_key in keep_trainable:
