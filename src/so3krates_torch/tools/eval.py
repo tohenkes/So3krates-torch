@@ -89,9 +89,10 @@ def evaluate_model(
         "so3krates",
         "mace",
     ], f"Unknown model type: {model_type}"
-    key_spec = mace_data.utils.KeySpecification(
-        ) if key_spec is None else key_spec
-    
+    key_spec = (
+        mace_data.utils.KeySpecification() if key_spec is None else key_spec
+    )
+
     data_loader = create_dataloader_from_list(
         atoms_list=atoms_list,
         batch_size=batch_size,
@@ -132,9 +133,9 @@ def evaluate_model(
             return_att=return_att,
         )
         energies = torch_tools.to_numpy(output["energy"])
-        energies = [energy.item() for energy in energies]
-        energies_list += energies
 
+        energies = [energy for energy in energies]
+        energies_list += energies
         if compute_stress:
             stresses = torch_tools.to_numpy(output["stress"])
             stresses = [stress for stress in stresses]
@@ -189,7 +190,7 @@ def evaluate_model(
         forces = np.split(
             torch_tools.to_numpy(output["forces"]),
             indices_or_sections=batch.ptr[1:],
-            axis=0,
+            axis=0 if not multihead_model else 1,
         )[:-1]
         forces = [force for force in forces]
         forces_list += forces
@@ -315,8 +316,9 @@ def ensemble_prediction(
         all_dipoles = []
     if compute_partial_charges:
         all_partial_charges = []
-    key_spec = mace_data.utils.KeySpecification(
-        ) if key_spec is None else key_spec
+    key_spec = (
+        mace_data.utils.KeySpecification() if key_spec is None else key_spec
+    )
     i = 0
     for model in models:
         results = evaluate_model(
@@ -334,7 +336,6 @@ def ensemble_prediction(
             compute_partial_charges=compute_partial_charges,
             dtype=dtype,
             key_spec=key_spec,
-            
         )
         all_forces.append(results["forces"])
         all_energies.append(results["energies"])
