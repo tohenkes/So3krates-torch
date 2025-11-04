@@ -511,7 +511,7 @@ def create_dataloader_from_list(
     shuffle: bool = False,
     drop_last: bool = False,
     z_table: utils.AtomicNumberTable = None,
-    head: str = None,
+    head_name: str = None,
 ):
     data_loader = torch_geometric.dataloader.DataLoader(
         dataset=create_data_from_list(
@@ -520,7 +520,7 @@ def create_dataloader_from_list(
             r_max_lr,
             key_specification=key_specification,
             z_table=z_table,
-            head=head,
+            head_name=head_name,
         ),
         batch_size=batch_size,
         shuffle=shuffle,

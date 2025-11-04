@@ -102,7 +102,7 @@ def main():
         "--head_key", type=str, help="Head key", default="head"
     )
     parser.add_argument(
-        "--head", type=str, help="Head key", default="head"
+        "--head_name", type=str, help="Head name", default="head"
     )
 
     args = parser.parse_args()
@@ -174,7 +174,7 @@ def main():
         total_charge_key=args.total_charge_key,
         total_spin_key=args.total_spin_key,
         hirshfeld_key=args.hirshfeld_key,
-        head=args.head,
+        head_name=args.head_name,
         head_key=args.head_key,
         r_max_lr=args.r_max_lr,
         log=True,  # Enable logging for detailed output

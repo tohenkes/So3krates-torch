@@ -651,7 +651,7 @@ def test_ensemble(
     device: str,
     path_to_data: str = None,
     atoms_list: list = None,
-    head: str = "head",
+    head_name: str = "head",
     logger: MetricsLogger = None,
     log_errors: str = "PerAtomMAE",
     return_predictions: bool = False,
@@ -750,7 +750,7 @@ def test_ensemble(
         key_specification=keyspec,
         shuffle=False,
         drop_last=False,
-        head=head,
+        head_name=head_name,
     )
 
     ensemble_metrics = {}
