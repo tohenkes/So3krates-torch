@@ -540,29 +540,25 @@ def setup_finetuning(config: dict, model: torch.nn.Module) -> None:
         config["TRAINING"].get("pretrained_weights") is not None
         or config["TRAINING"].get("pretrained_model") is not None
     )
-    assert pretrained_model_given, (
-        "Finetuning requires a pretrained model. "
-        "Please provide 'pretrained_weights' or 'pretrained_model' in the config."
-    )
-
-    choice = config["TRAINING"].get("finetune_choice", None)
-    if choice is not None:
-        logging.info(f"Setting up finetuning with choice: {choice}")
-        if choice != "naive":
-            freeze_model_parameters(
-                model,
-                choice,
+    if pretrained_model_given:
+        choice = config["TRAINING"].get("finetune_choice", None)
+        if choice is not None:
+            logging.info(f"Setting up finetuning with choice: {choice}")
+            if choice != "naive":
+                freeze_model_parameters(
+                    model,
+                    choice,
+                )
+            # log number of trainable params, absolute and percentage
+            total_params = sum(p.numel() for p in model.parameters())
+            trainable_params = sum(
+                p.numel() for p in model.parameters() if p.requires_grad
             )
-        # log number of trainable params, absolute and percentage
-        total_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(
-            p.numel() for p in model.parameters() if p.requires_grad
-        )
-        logging.info(f"Total model parameters: {total_params}")
-        logging.info(f"Trainable model parameters: {trainable_params}")
-        logging.info(
-            f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
-        )
+            logging.info(f"Total model parameters: {total_params}")
+            logging.info(f"Trainable model parameters: {trainable_params}")
+            logging.info(
+                f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
+            )
 
 
 def main():
