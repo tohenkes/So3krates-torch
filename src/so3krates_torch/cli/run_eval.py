@@ -7,6 +7,110 @@ from mace import data as mace_data
 from pathlib import Path
 
 
+def run_evaluation(
+    model_path: str,
+    data_path: str,
+    device: str = "cuda",
+    batch_size: int = 5,
+    model_type: str = "so3lr",
+    r_max_lr: float = 12.0,
+    multispecies: bool = False,
+    multihead_model: bool = False,
+    compute_dipole: bool = False,
+    compute_stress: bool = False,
+    compute_hirshfeld: bool = False,
+    compute_partial_charges: bool = False,
+    dispersion_energy_cutoff_lr_damping: float = 2.0,
+    energy_key: str = "REF_energy",
+    forces_key: str = "REF_forces",
+    stress_key: str = "REF_stress",
+    virials_key: str = "REF_virials",
+    dipole_key: str = "REF_dipoles",
+    charges_key: str = "REF_charges",
+    total_charge_key: str = "charge",
+    total_spin_key: str = "total_spin",
+    hirshfeld_key: str = "REF_hirsh_ratios",
+    head_key: str = "head",
+    dtype: str = "float32",
+    return_att: bool = False,
+):
+    """Load models from `model_path` (single .model or directory of .model),
+    read data from `data_path`, run evaluation or ensemble prediction and
+    return (result, is_ensemble).
+
+    This function mirrors the original inline logic but uses explicit
+    function arguments instead of relying on an argparse Namespace.
+    """
+    # check if path ends with .model or is dir
+    if model_path.endswith(".model"):
+        model_paths = [model_path]
+    else:
+        model_paths = list(Path(model_path).glob("*.model"))
+
+    models = []
+    for mp in model_paths:
+        model = torch.load(mp, map_location=device, weights_only=False)
+        model.return_mean = False
+        models.append(model)
+
+    data = read(data_path, index=":")
+    keyspec = mace_data.utils.KeySpecification(
+        info_keys={
+            "energy": energy_key,
+            "dipole": dipole_key,
+            "total_charge": total_charge_key,
+            "total_spin": total_spin_key,
+            "head": head_key,
+        },
+        arrays_keys={
+            "forces": forces_key,
+            "stress": stress_key,
+            "virials": virials_key,
+            "hirshfeld_ratios": hirshfeld_key,
+            "charges": charges_key,
+        },
+    )
+
+    if len(models) == 1:
+        model = models[0]
+        result = evaluate_model(
+            atoms_list=data,
+            model=model,
+            batch_size=batch_size,
+            device=device,
+            model_type=model_type,
+            multihead_model=multihead_model,
+            r_max_lr=r_max_lr,
+            dispersion_energy_cutoff_lr_damping=dispersion_energy_cutoff_lr_damping,
+            dtype=dtype,
+            multi_species=multispecies,
+            compute_stress=compute_stress,
+            compute_dipole=compute_dipole,
+            compute_hirshfeld=compute_hirshfeld,
+            compute_partial_charges=compute_partial_charges,
+            return_att=return_att,
+            key_spec=keyspec,
+        )
+    else:
+        result = ensemble_prediction(
+            models=models,
+            atoms_list=data,
+            device=device,
+            model_type=model_type,
+            dtype=dtype,
+            batch_size=batch_size,
+            multi_species=multispecies,
+            r_max_lr=r_max_lr,
+            dispersion_energy_cutoff_lr_damping=dispersion_energy_cutoff_lr_damping,
+            compute_stress=compute_stress,
+            compute_dipole=compute_dipole,
+            compute_hirshfeld=compute_hirshfeld,
+            compute_partial_charges=compute_partial_charges,
+            key_spec=keyspec,
+        )
+
+    return result, len(models) > 1
+
 def main():
 
     argparser = argparse.ArgumentParser()
@@ -78,74 +182,64 @@ def main():
     argparser.add_argument("--dtype", type=str, default="float32")
     argparser.add_argument("--return_att", action="store_true")
     args = argparser.parse_args()
-
-    # check if path ends with .model or is dir
-    if args.model_path.endswith(".model"):
-        model_paths = [args.model_path]
-    else:
-        model_paths = list(Path(args.model_path).glob("*.model"))
-
-    models = []
-    for model_path in model_paths:
-        model = torch.load(
-            model_path, map_location=args.device, weights_only=False
-        )
-        model.return_mean = False
-        models.append(model)
-
-    data = read(args.data_path, index=":")
-    keyspec = mace_data.utils.KeySpecification(
-        info_keys={
-            "energy": args.energy_key,
-            "dipole": args.dipole_key,
-            "total_charge": args.total_charge_key,
-            "total_spin": args.total_spin_key,
-            "head": args.head_key,
-        },
-        arrays_keys={
-            "forces": args.forces_key,
-            "stress": args.stress_key,
-            "virials": args.virials_key,
-            "hirshfeld_ratios": args.hirshfeld_key,
-            "charges": args.charges_key,
-        },
+    # turn all args into variables
+    model_path = args.model_path
+    data_path = args.data_path
+    output_file = args.output_file
+    ensemble_size = args.ensemble_size
+    device = args.device
+    batch_size = args.batch_size
+    model_type = args.model_type
+    r_max_lr = args.r_max_lr
+    multispecies = args.multispecies
+    multihead_model = args.multihead_model
+    compute_dipole = args.compute_dipole
+    compute_stress = args.compute_stress
+    compute_hirshfeld = args.compute_hirshfeld
+    compute_partial_charges = args.compute_partial_charges
+    dispersion_energy_cutoff_lr_damping = (
+        args.dispersion_energy_cutoff_lr_damping
     )
-    if len(models) == 1:
-        model = models[0]
-        result = evaluate_model(
-            atoms_list=data,
-            model=model,
-            batch_size=args.batch_size,
-            device=args.device,
-            model_type=args.model_type,
-            multihead_model=args.multihead_model,
-            r_max_lr=args.r_max_lr,
-            dispersion_energy_cutoff_lr_damping=args.dispersion_energy_cutoff_lr_damping,
-            dtype=args.dtype,
-            multi_species=args.multispecies,
-            compute_stress=args.compute_stress,
-            compute_dipole=args.compute_dipole,
-            compute_hirshfeld=args.compute_hirshfeld,
-            compute_partial_charges=args.compute_partial_charges,
-            return_att=args.return_att,
-            key_spec=keyspec,
-        )
-    else:
-        result = ensemble_prediction(
-            models=models,
-            atoms_list=data,
-            device=args.device,
-            model_type=args.model_type,
-            dtype=args.dtype,
-            batch_size=args.batch_size,
-            multi_species=args.multispecies,
-            r_max_lr=args.r_max_lr,
-            dispersion_energy_cutoff_lr_damping=args.dispersion_energy_cutoff_lr_damping,
-            compute_stress=args.compute_stress,
-            compute_dipole=args.compute_dipole,
-            compute_hirshfeld=args.compute_hirshfeld,
-            compute_partial_charges=args.compute_partial_charges,
-            key_spec=keyspec,
-        )
+    energy_key = args.energy_key
+    forces_key = args.forces_key
+    stress_key = args.stress_key
+    virials_key = args.virials_key
+    dipole_key = args.dipole_key
+    charges_key = args.charges_key
+    total_charge_key = args.total_charge_key
+    total_spin_key = args.total_spin_key
+    hirshfeld_key = args.hirshfeld_key
+    head_key = args.head_key
+    dtype = args.dtype
+    return_att = args.return_att
+    
+    result, is_ensemble = run_evaluation(
+        model_path=model_path,
+        data_path=data_path,
+        device=device,
+        batch_size=batch_size,
+        model_type=model_type,
+        r_max_lr=r_max_lr,
+        multispecies=multispecies,
+        multihead_model=multihead_model,
+        compute_stress=compute_stress,
+        compute_dipole=compute_dipole,
+        compute_hirshfeld=compute_hirshfeld,
+        compute_partial_charges=compute_partial_charges,
+        dispersion_energy_cutoff_lr_damping=dispersion_energy_cutoff_lr_damping,
+        energy_key=energy_key,
+        forces_key=forces_key,
+        stress_key=stress_key,
+        virials_key=virials_key,
+        dipole_key=dipole_key,
+        charges_key=charges_key,
+        total_charge_key=total_charge_key,
+        total_spin_key=total_spin_key,
+        hirshfeld_key=hirshfeld_key,
+        head_key=head_key,
+        dtype=dtype,
+        return_att=return_att,
+    )
 
-    save_results_hdf5(result, args.output_file, is_ensemble=len(models) > 1)
+    save_results_hdf5(result, output_file, is_ensemble=is_ensemble)
+

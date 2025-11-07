@@ -1,5 +1,6 @@
 import argparse
 import logging
+from igraph import config
 import yaml
 import torch
 from ase.io import read
@@ -123,13 +124,13 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
         ),
     }
 
-    if arch_config.get("multihead", False):
+    if arch_config.get("convert_to_multihead", False):
         model_params["num_output_heads"] = arch_config.get(
             "num_output_heads", None
         )
         assert (
             model_params["num_output_heads"] is not None
-        ), "num_output_heads must be specified when using multihead"
+        ), "num_output_heads must be specified when using convert_to_multihead"
         logging.info(
             f"Creating Multi-Head SO3LR model with {model_params['num_output_heads']} heads"
         )
@@ -165,7 +166,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     """Setup training and validation data loaders."""
     # Key specification for data loading
     keyspec = KeySpecification(
-        info_keys={"energy": "REF_energy", "dipole": "REF_dipole"},
+        info_keys={"energy": "REF_energy", "dipole": "REF_dipole", "total_charge": "total_charge"},
         arrays_keys={
             "hirshfeld_ratios": "REF_hirsh_ratios",
             "forces": "REF_forces",
@@ -676,33 +677,33 @@ def pretrained_to_mh_model(
     model: torch.nn.Module,
     device_name: str,
 ) -> None:
-    if config["ARCHITECTURE"].get("multihead", False):
-        logging.info("Converting pretrained model to multi-head format")
-        num_output_heads = config["ARCHITECTURE"].get("num_output_heads", None)
-        assert (
-            num_output_heads is not None
-        ), "num_output_heads must be specified for multi-head model"
+    logging.info("Converting pretrained model to multi-head format")
+    num_output_heads = config["ARCHITECTURE"].get("num_output_heads", None)
+    assert (
+        num_output_heads is not None
+    ), "num_output_heads must be specified for multi-head model"
 
-        assert (
-            config.get("ARCHITECTURE") is not None
-        ), "ARCHITECTURE settings must be provided in config"
+    assert (
+        config.get("ARCHITECTURE") is not None
+    ), "ARCHITECTURE settings must be provided in config"
 
-        exclude = [
-            "multihead",
-            "num_output_heads",
-            "cutoff_lr",
-        ]
-        settings = {
-            k: v for k, v in config["ARCHITECTURE"].items() if k not in exclude
-        }
-        settings["dtype"] = config["GENERAL"].get("default_dtype", "float32")
-        settings["device"] = device_name
-        model = model_to_multihead(
-            model=model,
-            settings=settings,
-            num_output_heads=num_output_heads,
-            device=device_name,
-        )
+    exclude = [
+        "convert_to_multihead",
+        "use_multihead",
+        "num_output_heads",
+        "cutoff_lr",
+    ]
+    settings = {
+        k: v for k, v in config["ARCHITECTURE"].items() if k not in exclude
+    }
+    settings["dtype"] = config["GENERAL"].get("default_dtype", "float32")
+    settings["device"] = device_name
+    model = model_to_multihead(
+        model=model,
+        settings=settings,
+        num_output_heads=num_output_heads,
+        device=device_name,
+    )
     return model
 
 
@@ -722,9 +723,8 @@ def setup_finetuning(
         )
 
         logging.info(f"Setting up finetuning with choice: {choice}")
-
-        # convert to multi-head if specified (check inside function)
-        model = pretrained_to_mh_model(config, model, device_name)
+        if config["ARCHITECTURE"].get("convert_to_multihead", False):
+            model = pretrained_to_mh_model(config, model, device_name)
 
         lora_rank = config["TRAINING"].get("lora_rank", 4)
         lora_alpha = config["TRAINING"].get("lora_alpha", 2.0 * lora_rank)
@@ -914,7 +914,7 @@ def run_training(config: dict) -> None:
     # Get error logging type
     log_errors = config["MISC"].get("error_table", "PerAtomMAE")
 
-    if config["ARCHITECTURE"].get("multihead", False):
+    if config["ARCHITECTURE"].get("use_multihead", False):
         logging.info(
             "Enabling head selection for multi-head model during training."
         )
@@ -951,7 +951,7 @@ def run_training(config: dict) -> None:
     )
     logging.info("Training completed successfully!")
 
-    if config["ARCHITECTURE"].get("multihead", False):
+    if config["ARCHITECTURE"].get("use_multihead", False):
         logging.info(
             "Disabling head selection for multi-head model after training."
         )
