@@ -185,8 +185,16 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     )
 
     # Compute average number of neighbors
-    avg_num_neighbors = compute_avg_num_neighbors(train_loader)
-    model.avg_num_neighbors = avg_num_neighbors
+    if config["ARCHITECTURE"].get(
+            "message_normalization", "avg_num_neighbors"
+        ) == "avg_num_neighbors":
+        avg_num_neighbors = compute_avg_num_neighbors(train_loader)
+
+        model.avg_num_neighbors = avg_num_neighbors
+        for layer in model.euclidean_transformers:
+            layer.euclidean_attention_block.att_norm_inv = avg_num_neighbors
+            layer.euclidean_attention_block.att_norm_ev = avg_num_neighbors
+
     logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
 
     return train_loader, {"main": valid_loader}

@@ -78,13 +78,22 @@ class AtomicEnergyOutputHead(nn.Module):
                 k: atomic_type_shifts[k]
                 for k in sorted(atomic_type_shifts.keys())
             }
-            self.energy_shifts = nn.Parameter(
-                torch.tensor(
-                    list(atomic_type_shifts.values()),
-                    dtype=torch.get_default_dtype(),
-                    requires_grad=False,
-                )
+            self.set_defined_energy_shifts(
+                atomic_type_shifts=atomic_type_shifts
             )
+
+    def set_defined_energy_shifts(
+            self,
+            atomic_type_shifts: Optional[Dict[str, float]]
+            ):
+        self.energy_shifts = nn.Parameter(
+            torch.tensor(
+                list(atomic_type_shifts.values()),
+                dtype=torch.get_default_dtype(),
+                requires_grad=False,
+            )
+        )
+
 
     def forward(
         self,
