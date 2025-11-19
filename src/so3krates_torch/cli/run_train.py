@@ -1,11 +1,10 @@
 import argparse
 import logging
-from igraph import config
 import yaml
 import torch
 from ase.io import read
 import random
-from typing import Tuple
+from typing import Tuple, Union
 from so3krates_torch.modules.models import SO3LR, MultiHeadSO3LR
 from so3krates_torch.tools.utils import (
     create_dataloader_from_list,
@@ -57,7 +56,7 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
     # Map YAML parameters to model parameters
     model_params = {
         # Base So3krates parameters
-        "r_max": arch_config.get("cutoff", 4.5),  # cutoff -> r_max
+        "r_max": arch_config.get("r_max", 4.5),  # cutoff -> r_max
         "num_radial_basis_fn": arch_config.get("num_radial_basis_fn", 32),
         "degrees": arch_config["degrees"],
         "num_features": arch_config.get("num_features", 128),
@@ -116,9 +115,9 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
             "dispersion_energy_scale", 1.2
         ),
         "dispersion_energy_cutoff_lr_damping": arch_config.get(
-            "dispersion_energy_cutoff_lr_damping"
+            "dispersion_energy_cutoff_lr_damping", None
         ),
-        "r_max_lr": config["ARCHITECTURE"].get("cutoff_lr", None),
+        "r_max_lr": arch_config.get("r_max_lr", None),
         "neighborlist_format_lr": arch_config.get(
             "neighborlist_format_lr", "sparse"
         ),
@@ -162,7 +161,7 @@ def select_valid_subset(
     return data[:n_train], data[n_train : n_train + n_valid]
 
 
-def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
+def setup_data_loaders(config: dict) -> tuple:
     """Setup training and validation data loaders."""
     # Key specification for data loading
     keyspec = KeySpecification(
@@ -175,7 +174,10 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     # Create data loaders
     batch_size = config["TRAINING"]["batch_size"]
     valid_batch_size = config["TRAINING"]["valid_batch_size"]
-    r_max_lr = config["TRAINING"].get("neighbors_lr_cutoff", 100.0)
+    r_max = config["ARCHITECTURE"].get("r_max", None)
+    r_max_lr = config["ARCHITECTURE"].get("r_max_lr", None)
+    if r_max_lr is None:
+        r_max_lr = 100.0
 
     heads = config["TRAINING"].get("heads", None)
     if heads is not None:
@@ -203,7 +205,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
 
             head_config_list_train = create_data_from_list(
                 head_train_data,
-                r_max=model.r_max,
+                r_max=r_max,
                 r_max_lr=r_max_lr,
                 key_specification=keyspec,
                 head_name=head_name,
@@ -213,7 +215,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
 
             head_config_list_val = create_data_from_list(
                 head_val_data,
-                r_max=model.r_max,
+                r_max=r_max,
                 r_max_lr=r_max_lr,
                 key_specification=keyspec,
                 head_name=head_name,
@@ -229,14 +231,13 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
             train_data,
             batch_size=batch_size,
             shuffle=True,
-        )   
-
+        )
+        num_elements = determine_num_elements(train_loader)
+        avg_num_neighbors = compute_avg_num_neighbors(train_loader)
         logging.info(f"Training set size: {len(train_data)}")
         logging.info(f"Validation set size: {len(val_data)}")
-
-        # Compute average number of neighbors
-        avg_num_neighbors = compute_avg_num_neighbors(train_loader)
-        return train_loader, val_data, avg_num_neighbors
+        logging.info(f"Number of unique elements in training set: {num_elements}")
+        return train_loader, val_data, avg_num_neighbors, num_elements
 
     else:
         # Load data
@@ -264,29 +265,45 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
         train_loader = create_dataloader_from_list(
             train_data,
             batch_size=batch_size,
-            r_max=model.r_max,
+            r_max=r_max,
             r_max_lr=r_max_lr,
             key_specification=keyspec,
             shuffle=True,
         )
-
+        num_elements = determine_num_elements(train_loader)
+        avg_num_neighbors = compute_avg_num_neighbors(train_loader)
+        
         valid_loader = create_dataloader_from_list(
             val_data,
             batch_size=valid_batch_size,
-            r_max=model.r_max,
+            r_max=r_max,
             r_max_lr=r_max_lr,
             key_specification=keyspec,
             shuffle=False,
         )
         logging.info(f"Training set size: {len(train_data)}")
         logging.info(f"Validation set size: {len(val_data)}")
+        logging.info(f"Number of unique elements in training set: {num_elements}")
+        return train_loader, {"main": valid_loader}, avg_num_neighbors, num_elements
 
-        # Compute average number of neighbors
-        avg_num_neighbors = compute_avg_num_neighbors(train_loader)
-        model.avg_num_neighbors = avg_num_neighbors
-        logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
-        return train_loader, {"main": valid_loader}, avg_num_neighbors
+def set_avg_num_neighbors_in_model(
+    model: Union[SO3LR, MultiHeadSO3LR],
+    avg_num_neighbors: float,
+) -> None:
+    logging.info(f"Average number of neighbors: {avg_num_neighbors:.2f}")
+    model.avg_num_neighbors = avg_num_neighbors
+    for layer in model.euclidean_transformers:
+        layer.euclidean_attention_block.att_norm_inv = avg_num_neighbors
+        layer.euclidean_attention_block.att_norm_ev = avg_num_neighbors
 
+def determine_num_elements(data_loader: torch.utils.data.DataLoader) -> int:
+    """Determine the number of unique elements in the dataset."""
+    unique_elements = set()
+    for batch in data_loader:
+        one_hot = batch['node_attrs']
+        elements = one_hot.argmax(dim=-1).flatten().tolist()
+        unique_elements.update(elements)
+    return len(unique_elements)
 
 def setup_loss_function(config: dict) -> torch.nn.Module:
     """Setup loss function based on configuration."""
@@ -691,7 +708,7 @@ def pretrained_to_mh_model(
         "convert_to_multihead",
         "use_multihead",
         "num_output_heads",
-        "cutoff_lr",
+        "r_max_lr",
     ]
     settings = {
         k: v for k, v in config["ARCHITECTURE"].items() if k not in exclude
@@ -708,7 +725,7 @@ def pretrained_to_mh_model(
 
 
 def setup_finetuning(
-    config: dict, model: torch.nn.Module, device_name: str
+    config: dict, model: torch.nn.Module, num_elements: int, device_name: str,
 ) -> None:
     # check that a pre-trained model is provided
     choice = config["TRAINING"].get("finetune_choice", None)
@@ -771,20 +788,44 @@ def setup_finetuning(
                 model,
                 choice,
                 freeze_lora_A=config["TRAINING"].get("lora_freeze_A", False),
+                freeze_embedding=config["TRAINING"].get(
+                    "freeze_embedding", True
+                ),
             )
-        # log number of trainable params, absolute and percentage
-        total_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(
-            p.numel() for p in model.parameters() if p.requires_grad
-        )
-        logging.info(f"Total model parameters: {total_params}")
-        logging.info(f"Trainable model parameters: {trainable_params}")
-        logging.info(
-            f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
-        )
+        report_count_params(model, num_elements)
     return model
 
+def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
+    dtype_map = {
+        "float32": torch.float32,
+        "float64": torch.float64,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }
+    if dtype_str not in dtype_map:
+        raise ValueError(f"Unsupported dtype: {dtype_str}")
+    dtype = dtype_map[dtype_str]
+    # set all model params to dtype
+    for param in model.parameters():
+        param.data = param.data.to(dtype)
 
+def report_count_params(model: torch.nn.Module, num_elements) -> int:
+    # log number of trainable params, absolute and percentage
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = 0
+    for name, param in model.named_parameters():
+        total_params += param.numel()
+        if param.requires_grad:
+            if "embedding" in name:
+                if param.shape[1] == 118:
+                    trainable_params += param[:, :num_elements].numel()
+            else:
+                trainable_params += param.numel()
+    logging.info(f"Total model parameters: {total_params}")
+    logging.info(f"Trainable model parameters: {trainable_params}")
+    logging.info(
+        f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
+    )
 def run_training(config: dict) -> None:
     """
     Execute the complete training pipeline.
@@ -842,14 +883,23 @@ def run_training(config: dict) -> None:
             load_pretrained_weights(model, pretrained_weights, device)
             warm_start = True
 
-    # Setup finetuning if specified
-    model = setup_finetuning(config, model, device_name)
-
-    # Setup data loaders
-    train_loader, valid_loaders, avg_num_neighbors = setup_data_loaders(
-        config, model
+    assert model.r_max == config["ARCHITECTURE"].get("r_max", 4.5), (
+        f"Model r_max ({model.r_max}) does not match config "
+        f"r_max ({config['ARCHITECTURE'].get('r_max', 4.5)})"
     )
 
+
+    # Setup data loaders
+    (train_loader,
+     valid_loaders,
+     avg_num_neighbors,
+     num_elements
+     ) = setup_data_loaders(config)
+    set_avg_num_neighbors_in_model(model, avg_num_neighbors)
+    
+    # Setup finetuning if specified
+    model = setup_finetuning(config, model, num_elements, device_name)
+    
     if warm_start:
         fine_tune_choice = config["TRAINING"].get("finetune_choice", None)
         if fine_tune_choice == "naive":
@@ -867,6 +917,10 @@ def run_training(config: dict) -> None:
     else:
         model.avg_num_neighbors = avg_num_neighbors
 
+    set_dtype_model(
+        model, config["GENERAL"].get("default_dtype", "float32")
+    )
+    
     # Setup loss function
     loss_fn = setup_loss_function(config)
 
@@ -957,7 +1011,6 @@ def run_training(config: dict) -> None:
         )
         model.select_heads = False
 
-    # TODO: fuse model weights if using LoRA before saving
     if config["TRAINING"].get("finetune_choice", None) in [
         "dora",
         "lora",
