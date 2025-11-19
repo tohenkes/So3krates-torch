@@ -107,7 +107,7 @@ def create_model(config: dict, device: torch.device) -> SO3LR:
         "dispersion_energy_cutoff_lr_damping": arch_config.get(
             "dispersion_energy_cutoff_lr_damping"
         ),
-        "r_max_lr": config["ARCHITECTURE"].get("cutoff_lr", None),
+        "r_max_lr": config["ARCHITECTURE"].get("r_max_lr", None),
         "neighborlist_format": arch_config.get(
             "neighborlist_format_lr", "sparse"
         ),
@@ -164,7 +164,7 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     # Create data loaders
     batch_size = config["TRAINING"]["batch_size"]
     valid_batch_size = config["TRAINING"]["valid_batch_size"]
-    r_max_lr = config["TRAINING"].get("r_max_lr", 100.0)
+    r_max_lr = config["ARCHITECTURE"].get("r_max_lr", 100.0)
 
     train_loader = create_dataloader(
         train_data,
