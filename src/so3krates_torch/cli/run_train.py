@@ -164,7 +164,9 @@ def setup_data_loaders(config: dict, model: SO3LR) -> tuple:
     # Create data loaders
     batch_size = config["TRAINING"]["batch_size"]
     valid_batch_size = config["TRAINING"]["valid_batch_size"]
-    r_max_lr = config["ARCHITECTURE"].get("r_max_lr", 100.0)
+    r_max_lr = config["ARCHITECTURE"].get("r_max_lr", None)
+    if r_max_lr is None:
+        r_max_lr = 100.0
 
     train_loader = create_dataloader(
         train_data,
