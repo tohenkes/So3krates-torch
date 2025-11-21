@@ -12,11 +12,11 @@ from so3krates_torch.tools.utils import (
     create_dataloader_from_data,
 )
 from so3krates_torch.modules.loss import (
+    WeightedEnergyForcesLoss,
     WeightedEnergyForcesDipoleLoss,
     WeightedEnergyForcesHirshfeldLoss,
     WeightedEnergyForcesDipoleHirshfeldLoss,
 )
-from mace.modules.loss import WeightedEnergyForcesLoss
 from mace.data.utils import KeySpecification
 from mace.modules.utils import compute_avg_num_neighbors
 from mace.tools.utils import MetricsLogger, setup_logger
@@ -168,7 +168,7 @@ def setup_data_loaders(config: dict) -> tuple:
         info_keys={
             "energy": "REF_energy",
             "dipole": "REF_dipole",
-            "total_charge": "total_charge",
+            "total_charge": "charge"
         },
         arrays_keys={
             "hirshfeld_ratios": "REF_hirsh_ratios",
