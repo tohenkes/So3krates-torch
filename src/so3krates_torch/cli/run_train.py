@@ -165,7 +165,11 @@ def setup_data_loaders(config: dict) -> tuple:
     """Setup training and validation data loaders."""
     # Key specification for data loading
     keyspec = KeySpecification(
-        info_keys={"energy": "REF_energy", "dipole": "REF_dipole", "total_charge": "total_charge"},
+        info_keys={
+            "energy": "REF_energy",
+            "dipole": "REF_dipole",
+            "total_charge": "total_charge",
+        },
         arrays_keys={
             "hirshfeld_ratios": "REF_hirsh_ratios",
             "forces": "REF_forces",
@@ -209,7 +213,7 @@ def setup_data_loaders(config: dict) -> tuple:
                 r_max_lr=r_max_lr,
                 key_specification=keyspec,
                 head_name=head_name,
-                all_heads=list(heads.keys())
+                all_heads=list(heads.keys()),
             )
             train_data.extend(head_config_list_train)
 
@@ -219,7 +223,7 @@ def setup_data_loaders(config: dict) -> tuple:
                 r_max_lr=r_max_lr,
                 key_specification=keyspec,
                 head_name=head_name,
-                all_heads=list(heads.keys())
+                all_heads=list(heads.keys()),
             )
             val_data[head_name] = create_dataloader_from_data(
                 head_config_list_val,
@@ -236,7 +240,9 @@ def setup_data_loaders(config: dict) -> tuple:
         avg_num_neighbors = compute_avg_num_neighbors(train_loader)
         logging.info(f"Training set size: {len(train_data)}")
         logging.info(f"Validation set size: {len(val_data)}")
-        logging.info(f"Number of unique elements in training set: {num_elements}")
+        logging.info(
+            f"Number of unique elements in training set: {num_elements}"
+        )
         return train_loader, val_data, avg_num_neighbors, num_elements
 
     else:
@@ -272,7 +278,7 @@ def setup_data_loaders(config: dict) -> tuple:
         )
         num_elements = determine_num_elements(train_loader)
         avg_num_neighbors = compute_avg_num_neighbors(train_loader)
-        
+
         valid_loader = create_dataloader_from_list(
             val_data,
             batch_size=valid_batch_size,
@@ -283,8 +289,16 @@ def setup_data_loaders(config: dict) -> tuple:
         )
         logging.info(f"Training set size: {len(train_data)}")
         logging.info(f"Validation set size: {len(val_data)}")
-        logging.info(f"Number of unique elements in training set: {num_elements}")
-        return train_loader, {"main": valid_loader}, avg_num_neighbors, num_elements
+        logging.info(
+            f"Number of unique elements in training set: {num_elements}"
+        )
+        return (
+            train_loader,
+            {"main": valid_loader},
+            avg_num_neighbors,
+            num_elements,
+        )
+
 
 def set_avg_num_neighbors_in_model(
     model: Union[SO3LR, MultiHeadSO3LR],
@@ -296,14 +310,16 @@ def set_avg_num_neighbors_in_model(
         layer.euclidean_attention_block.att_norm_inv = avg_num_neighbors
         layer.euclidean_attention_block.att_norm_ev = avg_num_neighbors
 
+
 def determine_num_elements(data_loader: torch.utils.data.DataLoader) -> int:
     """Determine the number of unique elements in the dataset."""
     unique_elements = set()
     for batch in data_loader:
-        one_hot = batch['node_attrs']
+        one_hot = batch["node_attrs"]
         elements = one_hot.argmax(dim=-1).flatten().tolist()
         unique_elements.update(elements)
     return len(unique_elements)
+
 
 def setup_loss_function(config: dict) -> torch.nn.Module:
     """Setup loss function based on configuration."""
@@ -725,7 +741,10 @@ def pretrained_to_mh_model(
 
 
 def setup_finetuning(
-    config: dict, model: torch.nn.Module, num_elements: int, device_name: str,
+    config: dict,
+    model: torch.nn.Module,
+    num_elements: int,
+    device_name: str,
 ) -> None:
     # check that a pre-trained model is provided
     choice = config["TRAINING"].get("finetune_choice", None)
@@ -791,9 +810,11 @@ def setup_finetuning(
                 freeze_embedding=config["TRAINING"].get(
                     "freeze_embedding", True
                 ),
+                freeze_zbl=config["TRAINING"].get("freeze_zbl", True),
             )
         report_count_params(model, num_elements)
     return model
+
 
 def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
     dtype_map = {
@@ -808,6 +829,7 @@ def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
     # set all model params to dtype
     for param in model.parameters():
         param.data = param.data.to(dtype)
+
 
 def report_count_params(model: torch.nn.Module, num_elements) -> int:
     # log number of trainable params, absolute and percentage
@@ -826,6 +848,8 @@ def report_count_params(model: torch.nn.Module, num_elements) -> int:
     logging.info(
         f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
     )
+
+
 def run_training(config: dict) -> None:
     """
     Execute the complete training pipeline.
@@ -888,18 +912,18 @@ def run_training(config: dict) -> None:
         f"r_max ({config['ARCHITECTURE'].get('r_max', 4.5)})"
     )
 
-
     # Setup data loaders
-    (train_loader,
-     valid_loaders,
-     avg_num_neighbors,
-     num_elements
-     ) = setup_data_loaders(config)
+    (
+        train_loader,
+        valid_loaders,
+        avg_num_neighbors,
+        num_elements,
+    ) = setup_data_loaders(config)
     set_avg_num_neighbors_in_model(model, avg_num_neighbors)
-    
+
     # Setup finetuning if specified
     model = setup_finetuning(config, model, num_elements, device_name)
-    
+
     if warm_start:
         fine_tune_choice = config["TRAINING"].get("finetune_choice", None)
         if fine_tune_choice == "naive":
@@ -917,10 +941,8 @@ def run_training(config: dict) -> None:
     else:
         model.avg_num_neighbors = avg_num_neighbors
 
-    set_dtype_model(
-        model, config["GENERAL"].get("default_dtype", "float32")
-    )
-    
+    set_dtype_model(model, config["GENERAL"].get("default_dtype", "float32"))
+
     # Setup loss function
     loss_fn = setup_loss_function(config)
 
