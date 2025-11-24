@@ -833,8 +833,8 @@ def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
 
 def report_count_params(model: torch.nn.Module, num_elements) -> int:
     # log number of trainable params, absolute and percentage
-    total_params = sum(p.numel() for p in model.parameters())
     trainable_params = 0
+    total_params = 0
     for name, param in model.named_parameters():
         total_params += param.numel()
         if param.requires_grad:
