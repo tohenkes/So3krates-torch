@@ -10,7 +10,7 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 1. activate your environment
 2. clone this repository
 3. move to the clone repository
-4. `pip install -r requirements.xt`
+4. `pip install -r requirements.txt`
 5. `pip install .`
 
 #### Implemented features:
