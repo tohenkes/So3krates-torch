@@ -953,10 +953,8 @@ def convert_torch_to_flax_params(
         ):
             # Remove unsqueeze dimension and add padding at beginning
             numpy_array = numpy_array.squeeze(0)  # Remove the (1,) dimension
-            pad_shape = list(numpy_array.shape)
-            pad_shape[1] = 1  # Add one element
-            padding = np.zeros(pad_shape, dtype=numpy_array.dtype)
-            numpy_array = np.concatenate([padding, numpy_array], axis=1)
+            padding = np.zeros((1,), dtype=numpy_array.dtype)
+            numpy_array = np.concatenate([padding, numpy_array], axis=0)
 
         # Handle matrix transposes (reverse of flax_to_torch logic)
         if numpy_array.ndim == 2 and torch_key not in special_embeddings:
