@@ -458,7 +458,6 @@ class EuclideanAttentionBlock(torch.nn.Module):
             receivers=receivers,
             senders=senders,
         )
-        # print(filter_w_inv[0,0,:10])
         # Eq. 21 https://doi.org/10.1038/s41467-024-50620-6
         filtered_k_inv = k_inv * filter_w_inv
         filtered_k_ev = k_ev * filter_w_ev

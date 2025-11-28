@@ -297,42 +297,42 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
         mapping[f"{params_obs}zbl_repulsion/p"] = "zbl_repulsion.p_raw"
         mapping[f"{params_obs}zbl_repulsion/d"] = "zbl_repulsion.d_raw"
 
-    if use_electrostatic_energy:
-        mapping[
-            f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"
-        ] = "partial_charges_output_block.atomic_embedding.weight"
-        mapping[
-            f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/kernel"
-        ] = "partial_charges_output_block.transform_inv_features.0.weight"
-        mapping[
-            f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/bias"
-        ] = "partial_charges_output_block.transform_inv_features.0.bias"
-        mapping[
-            f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/kernel"
-        ] = "partial_charges_output_block.transform_inv_features.2.weight"
-        mapping[
-            f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/bias"
-        ] = "partial_charges_output_block.transform_inv_features.2.bias"
+    #if use_electrostatic_energy:
+    mapping[
+        f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"
+    ] = "partial_charges_output_block.atomic_embedding.weight"
+    mapping[
+        f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/kernel"
+    ] = "partial_charges_output_block.transform_inv_features.0.weight"
+    mapping[
+        f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/bias"
+    ] = "partial_charges_output_block.transform_inv_features.0.bias"
+    mapping[
+        f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/kernel"
+    ] = "partial_charges_output_block.transform_inv_features.2.weight"
+    mapping[
+        f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/bias"
+    ] = "partial_charges_output_block.transform_inv_features.2.bias"
 
-    if use_dispersion_energy:
-        mapping["params/observables_2/Embed_0/embedding"] = (
-            "hirshfeld_output_block.v_shift_embedding.weight"
-        )
-        mapping["params/observables_2/Embed_1/embedding"] = (
-            "hirshfeld_output_block.q_embedding.weight"
-        )
-        mapping[
-            "params/observables_2/hirshfeld_ratios_dense_regression/kernel"
-        ] = "hirshfeld_output_block.transform_features.0.weight"
-        mapping[
-            "params/observables_2/hirshfeld_ratios_dense_regression/bias"
-        ] = "hirshfeld_output_block.transform_features.0.bias"
-        mapping["params/observables_2/hirshfeld_ratios_dense_final/kernel"] = (
-            "hirshfeld_output_block.transform_features.2.weight"
-        )
-        mapping["params/observables_2/hirshfeld_ratios_dense_final/bias"] = (
-            "hirshfeld_output_block.transform_features.2.bias"
-        )
+    #if use_dispersion_energy:
+    mapping["params/observables_2/Embed_0/embedding"] = (
+        "hirshfeld_output_block.v_shift_embedding.weight"
+    )
+    mapping["params/observables_2/Embed_1/embedding"] = (
+        "hirshfeld_output_block.q_embedding.weight"
+    )
+    mapping[
+        "params/observables_2/hirshfeld_ratios_dense_regression/kernel"
+    ] = "hirshfeld_output_block.transform_features.0.weight"
+    mapping[
+        "params/observables_2/hirshfeld_ratios_dense_regression/bias"
+    ] = "hirshfeld_output_block.transform_features.0.bias"
+    mapping["params/observables_2/hirshfeld_ratios_dense_final/kernel"] = (
+        "hirshfeld_output_block.transform_features.2.weight"
+    )
+    mapping["params/observables_2/hirshfeld_ratios_dense_final/bias"] = (
+        "hirshfeld_output_block.transform_features.2.bias"
+    )
 
     return mapping
 
@@ -375,9 +375,9 @@ def get_model_settings_flax_to_torch(
         use_charge_embed=cfg.model.use_charge_embed,
         use_spin_embed=cfg.model.use_spin_embed,
         zbl_repulsion_bool=cfg.model.zbl_repulsion_bool,
-        electrostatic_energy_bool=cfg.model.electrostatic_energy_bool,
+        electrostatic_energy_bool=True,# cfg.model.electrostatic_energy_bool, # always true, because its fuckting dumb how they handle the oberservable bools, turned false later
         electrostatic_energy_scale=cfg.model.electrostatic_energy_scale,
-        dispersion_energy_bool=cfg.model.dispersion_energy_bool,
+        dispersion_energy_bool=True, # cfg.model.dispersion_energy_bool, # always true, because its fuckting dumb how they handle the oberservable bools, turned false later
         dispersion_energy_cutoff_lr_damping=cfg.model.dispersion_energy_cutoff_lr_damping,
         dispersion_energy_scale=cfg.model.dispersion_energy_scale,
         qk_non_linearity=cfg.model.qk_non_linearity,
@@ -471,12 +471,21 @@ def convert_flax_to_torch(
     )
     if save_torch_settings:
         serializable_settings = torch_model_settings.copy()
+        if cfg.model.electrostatic_energy_bool is False:
+            serializable_settings["electrostatic_energy_bool"] = False
+        if cfg.model.dispersion_energy_bool is False:
+            serializable_settings["dispersion_energy_bool"] = False
+        if cfg.model.zbl_repulsion_bool is False:
+            serializable_settings["zbl_repulsion_bool"] = False
+            
         serializable_settings["dtype"] = str(
             dtype
         )  # Convert torch.dtype to string
-
+        settings_to_save = {
+            "ARCHITECTURE": serializable_settings
+        }
         with open(save_torch_settings, "w") as f:
-            yaml.dump(serializable_settings, f, default_flow_style=False)
+            yaml.dump(settings_to_save, f, default_flow_style=False)
 
     if so3lr:
         torch_model = SO3LR(**torch_model_settings)
@@ -495,6 +504,15 @@ def convert_flax_to_torch(
         torch.save(torch_state_dict, torch_save_path)
     torch_model.load_state_dict(torch_state_dict)
     torch_model.to(device)
+    
+    if cfg.model.electrostatic_energy_bool is False:
+        torch_model.electrostatic_energy_bool = False
+    if cfg.model.dispersion_energy_bool is False:
+        torch_model.dispersion_energy_bool = False
+    if cfg.model.zbl_repulsion_bool is False:
+        torch_model.zbl_repulsion_bool = False
+    
+    
     return torch_model
 
 
@@ -744,54 +762,54 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
         )
 
     params_obs = "params/observables_0/"
-    if use_zbl:
-        mapping["zbl_repulsion.a1_raw"] = f"{params_obs}zbl_repulsion/a1"
-        mapping["zbl_repulsion.a2_raw"] = f"{params_obs}zbl_repulsion/a2"
-        mapping["zbl_repulsion.a3_raw"] = f"{params_obs}zbl_repulsion/a3"
-        mapping["zbl_repulsion.a4_raw"] = f"{params_obs}zbl_repulsion/a4"
-        mapping["zbl_repulsion.c1_raw"] = f"{params_obs}zbl_repulsion/c1"
-        mapping["zbl_repulsion.c2_raw"] = f"{params_obs}zbl_repulsion/c2"
-        mapping["zbl_repulsion.c3_raw"] = f"{params_obs}zbl_repulsion/c3"
-        mapping["zbl_repulsion.c4_raw"] = f"{params_obs}zbl_repulsion/c4"
-        mapping["zbl_repulsion.p_raw"] = f"{params_obs}zbl_repulsion/p"
-        mapping["zbl_repulsion.d_raw"] = f"{params_obs}zbl_repulsion/d"
+    #if use_zbl:
+    mapping["zbl_repulsion.a1_raw"] = f"{params_obs}zbl_repulsion/a1"
+    mapping["zbl_repulsion.a2_raw"] = f"{params_obs}zbl_repulsion/a2"
+    mapping["zbl_repulsion.a3_raw"] = f"{params_obs}zbl_repulsion/a3"
+    mapping["zbl_repulsion.a4_raw"] = f"{params_obs}zbl_repulsion/a4"
+    mapping["zbl_repulsion.c1_raw"] = f"{params_obs}zbl_repulsion/c1"
+    mapping["zbl_repulsion.c2_raw"] = f"{params_obs}zbl_repulsion/c2"
+    mapping["zbl_repulsion.c3_raw"] = f"{params_obs}zbl_repulsion/c3"
+    mapping["zbl_repulsion.c4_raw"] = f"{params_obs}zbl_repulsion/c4"
+    mapping["zbl_repulsion.p_raw"] = f"{params_obs}zbl_repulsion/p"
+    mapping["zbl_repulsion.d_raw"] = f"{params_obs}zbl_repulsion/d"
 
-    if use_electrostatic_energy:
-        mapping["partial_charges_output_block.atomic_embedding.weight"] = (
-            f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"
-        )
-        mapping[
-            "partial_charges_output_block.transform_inv_features.0.weight"
-        ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/kernel"
-        mapping[
-            "partial_charges_output_block.transform_inv_features.0.bias"
-        ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/bias"
-        mapping[
-            "partial_charges_output_block.transform_inv_features.2.weight"
-        ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/kernel"
-        mapping[
-            "partial_charges_output_block.transform_inv_features.2.bias"
-        ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/bias"
+    #if use_electrostatic_energy:
+    mapping["partial_charges_output_block.atomic_embedding.weight"] = (
+        f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"
+    )
+    mapping[
+        "partial_charges_output_block.transform_inv_features.0.weight"
+    ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/kernel"
+    mapping[
+        "partial_charges_output_block.transform_inv_features.0.bias"
+    ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/bias"
+    mapping[
+        "partial_charges_output_block.transform_inv_features.2.weight"
+    ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/kernel"
+    mapping[
+        "partial_charges_output_block.transform_inv_features.2.bias"
+    ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/bias"
 
-    if use_dispersion_energy:
-        mapping["hirshfeld_output_block.v_shift_embedding.weight"] = (
-            "params/observables_2/Embed_0/embedding"
-        )
-        mapping["hirshfeld_output_block.q_embedding.weight"] = (
-            "params/observables_2/Embed_1/embedding"
-        )
-        mapping["hirshfeld_output_block.transform_features.0.weight"] = (
-            "params/observables_2/hirshfeld_ratios_dense_regression/kernel"
-        )
-        mapping["hirshfeld_output_block.transform_features.0.bias"] = (
-            "params/observables_2/hirshfeld_ratios_dense_regression/bias"
-        )
-        mapping["hirshfeld_output_block.transform_features.2.weight"] = (
-            "params/observables_2/hirshfeld_ratios_dense_final/kernel"
-        )
-        mapping["hirshfeld_output_block.transform_features.2.bias"] = (
-            "params/observables_2/hirshfeld_ratios_dense_final/bias"
-        )
+    #if use_dispersion_energy:
+    mapping["hirshfeld_output_block.v_shift_embedding.weight"] = (
+        "params/observables_2/Embed_0/embedding"
+    )
+    mapping["hirshfeld_output_block.q_embedding.weight"] = (
+        "params/observables_2/Embed_1/embedding"
+    )
+    mapping["hirshfeld_output_block.transform_features.0.weight"] = (
+        "params/observables_2/hirshfeld_ratios_dense_regression/kernel"
+    )
+    mapping["hirshfeld_output_block.transform_features.0.bias"] = (
+        "params/observables_2/hirshfeld_ratios_dense_regression/bias"
+    )
+    mapping["hirshfeld_output_block.transform_features.2.weight"] = (
+        "params/observables_2/hirshfeld_ratios_dense_final/kernel"
+    )
+    mapping["hirshfeld_output_block.transform_features.2.bias"] = (
+        "params/observables_2/hirshfeld_ratios_dense_final/bias"
+    )
 
     return mapping
 
@@ -953,10 +971,8 @@ def convert_torch_to_flax_params(
         ):
             # Remove unsqueeze dimension and add padding at beginning
             numpy_array = numpy_array.squeeze(0)  # Remove the (1,) dimension
-            pad_shape = list(numpy_array.shape)
-            pad_shape[1] = 1  # Add one element
-            padding = np.zeros(pad_shape, dtype=numpy_array.dtype)
-            numpy_array = np.concatenate([padding, numpy_array], axis=1)
+            padding = np.zeros((1,), dtype=numpy_array.dtype)
+            numpy_array = np.concatenate([padding, numpy_array], axis=0)
 
         # Handle matrix transposes (reverse of flax_to_torch logic)
         if numpy_array.ndim == 2 and torch_key not in special_embeddings:

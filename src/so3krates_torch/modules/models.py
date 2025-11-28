@@ -285,7 +285,7 @@ class So3krates(torch.nn.Module):
 
         ######### EMBEDDING #########
         inv_features = self.inv_feature_embedding(data["node_attrs"])
-
+        
         if self.use_charge_embed:
             inv_features += self.charge_embedding(
                 elements_one_hot=data["node_attrs"],
@@ -475,33 +475,37 @@ class SO3LR(So3krates):
         self.use_lr = False
 
         # Short-range repulsion
-        if self.zbl_repulsion_bool:
-            self.zbl_repulsion = ZBLRepulsion()
-
+        self.zbl_repulsion = ZBLRepulsion()
+        
+        # i'm sorry for this. but in the jax version they always initiate
+        # the long range modules even though the booleans are set to false.
+        # if didn't do this there would be problems when converting models
+        # to jax back and forth ... its ugly and wasteful, i know.
+        
         # Electrostatics
         if self.electrostatic_energy_bool:
             self.use_lr = True
-            self.partial_charges_output_block = PartialChargesOutputHead(
-                num_features=self.num_features,
-                regression_dim=self.energy_regression_dim,
-                activation_fn=self.energy_activation_fn,
-            )
-            self.dipole_output_head = DipoleVecOutputHead()
-            self.electrostatic_potential = ElectrostaticInteraction(
-                neighborlist_format_lr=self.neighborlist_format_lr
-            )
+        self.partial_charges_output_block = PartialChargesOutputHead(
+            num_features=self.num_features,
+            regression_dim=self.energy_regression_dim,
+            activation_fn=self.energy_activation_fn,
+        )
+        self.dipole_output_head = DipoleVecOutputHead()
+        self.electrostatic_potential = ElectrostaticInteraction(
+            neighborlist_format_lr=self.neighborlist_format_lr
+        )
 
         # Dispersion
         if self.dispersion_energy_bool:
             self.use_lr = True
-            self.hirshfeld_output_block = HirshfeldOutputHead(
-                num_features=self.num_features,
-                regression_dim=self.energy_regression_dim,
-                activation_fn=self.energy_activation_fn,
-            )
-            self.dispersion_potential = DispersionInteraction(
-                neighborlist_format_lr=self.neighborlist_format_lr
-            )
+        self.hirshfeld_output_block = HirshfeldOutputHead(
+            num_features=self.num_features,
+            regression_dim=self.energy_regression_dim,
+            activation_fn=self.energy_activation_fn,
+        )
+        self.dispersion_potential = DispersionInteraction(
+            neighborlist_format_lr=self.neighborlist_format_lr
+        )
 
     def _get_graph(
         self,
@@ -620,7 +624,6 @@ class SO3LR(So3krates):
 
         self.batch_segments = data["batch"]
         self.data_ptr = data["ptr"]
-
         repr_output = self.get_representation(
             data=data,
             compute_force=compute_force,
@@ -643,6 +646,9 @@ class SO3LR(So3krates):
             data,
             atomic_numbers=data["atomic_numbers"],
         )
+        
+
+        
         if self.use_lr:
             self.receivers_lr, self.senders_lr = (
                 data["edge_index_lr"][0],

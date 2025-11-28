@@ -79,10 +79,10 @@ def main():
 
     with open(args.path_to_hyperparams, "r") as f:
         torch_settings = yaml.safe_load(f)
-    state_dict = torch.load(args.path_to_state_dict, weights_only=True)
+    state_dict = torch.load(args.path_to_state_dict, weights_only=True, map_location=torch.device('cpu'))
     cfg, params = convert_torch_to_flax(
         torch_state_dict=state_dict,
-        torch_settings=torch_settings,
+        torch_settings=torch_settings['ARCHITECTURE'],
         dtype=args.dtype,
     )
 

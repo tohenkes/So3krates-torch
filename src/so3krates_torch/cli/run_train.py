@@ -812,7 +812,15 @@ def setup_finetuning(
                 ),
                 freeze_zbl=config["TRAINING"].get("freeze_zbl", True),
             )
-        report_count_params(model, num_elements)
+        use_eletrostatics = model.electrostatic_energy_bool
+        use_dispersion = model.dispersion_energy_bool
+        
+        report_count_params(
+            model, 
+            num_elements,
+            use_eletrostatics, 
+            use_dispersion
+        )
     return model
 
 
@@ -831,11 +839,20 @@ def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
         param.data = param.data.to(dtype)
 
 
-def report_count_params(model: torch.nn.Module, num_elements) -> int:
+def report_count_params(
+    model: torch.nn.Module,
+    num_elements: int,
+    use_eletrostatics: bool,
+    use_dispersion: bool,
+    ) -> int:
     # log number of trainable params, absolute and percentage
     trainable_params = 0
     total_params = 0
     for name, param in model.named_parameters():
+        if not use_eletrostatics and "partial_charges_output_block" in name:
+            continue
+        if not use_dispersion and "hirshfeld_output_block" in name:
+            continue
         total_params += param.numel()
         if param.requires_grad:
             if "embedding" in name:
