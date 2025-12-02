@@ -2,6 +2,7 @@ import argparse
 import logging
 import yaml
 import torch
+import torch.nn as nn
 from ase.io import read
 import random
 from typing import Tuple, Union
@@ -10,6 +11,8 @@ from so3krates_torch.tools.utils import (
     create_dataloader_from_list,
     create_data_from_list,
     create_dataloader_from_data,
+    create_configs_from_list,
+    create_data_from_configs,
 )
 from so3krates_torch.modules.loss import (
     WeightedEnergyForcesLoss,
@@ -17,9 +20,9 @@ from so3krates_torch.modules.loss import (
     WeightedEnergyForcesHirshfeldLoss,
     WeightedEnergyForcesDipoleHirshfeldLoss,
 )
-from mace.data.utils import KeySpecification
+from mace.data.utils import KeySpecification, compute_average_E0s
 from mace.modules.utils import compute_avg_num_neighbors
-from mace.tools.utils import MetricsLogger, setup_logger
+from mace.tools.utils import MetricsLogger, setup_logger, AtomicNumberTable
 from mace.tools.checkpoint import CheckpointHandler, CheckpointState
 from torch_ema import ExponentialMovingAverage
 from so3krates_torch.tools.train import train
@@ -31,6 +34,14 @@ from so3krates_torch.tools.finetune import (
 )
 import os
 
+
+
+DTYPE_MAP = {
+    "float32": torch.float32,
+    "float64": torch.float64,
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+}
 
 def setup_config_from_yaml(config_path: str) -> dict:
     """Load and parse configuration from YAML file."""
@@ -180,12 +191,10 @@ def setup_data_loaders(config: dict) -> tuple:
     valid_batch_size = config["TRAINING"]["valid_batch_size"]
     r_max = config["ARCHITECTURE"].get("r_max", None)
     r_max_lr = config["ARCHITECTURE"].get("r_max_lr", None)
-    if r_max_lr is None:
-        r_max_lr = 100.0
 
     heads = config["TRAINING"].get("heads", None)
     if heads is not None:
-        train_data = []
+        train_configs = []
         val_data = {}
         for head_name, head_config in heads.items():
             head_data = read(head_config["path_to_train_data"], index=":")
@@ -207,15 +216,12 @@ def setup_data_loaders(config: dict) -> tuple:
                 f"Head {head_name} - Validation set size: {len(head_val_data)}"
             )
 
-            head_config_list_train = create_data_from_list(
-                head_train_data,
-                r_max=r_max,
-                r_max_lr=r_max_lr,
+            head_config_list_train = create_configs_from_list(
+                atoms_list=head_train_data,
                 key_specification=keyspec,
                 head_name=head_name,
-                all_heads=list(heads.keys()),
             )
-            train_data.extend(head_config_list_train)
+            train_configs.extend(head_config_list_train)
 
             head_config_list_val = create_data_from_list(
                 head_val_data,
@@ -231,8 +237,19 @@ def setup_data_loaders(config: dict) -> tuple:
                 shuffle=False,
             )
 
+        average_atomic_energy_shifts = compute_average_E0s(
+            collections_train=train_configs,
+            z_table= AtomicNumberTable([int(z) for z in range(1, 119)])
+        )
+        train_data = create_data_from_configs(
+            train_configs,
+            r_max=r_max,
+            r_max_lr=r_max_lr,
+            all_heads=list(heads.keys()),
+        )        
+        
         train_loader = create_dataloader_from_data(
-            train_data,
+            config_list=train_data,
             batch_size=batch_size,
             shuffle=True,
         )
@@ -243,7 +260,14 @@ def setup_data_loaders(config: dict) -> tuple:
         logging.info(
             f"Number of unique elements in training set: {num_elements}"
         )
-        return train_loader, val_data, avg_num_neighbors, num_elements
+        return (
+            train_loader,
+            val_data,
+            avg_num_neighbors,
+            num_elements,
+            average_atomic_energy_shifts
+        )
+
 
     else:
         # Load data
@@ -268,14 +292,27 @@ def setup_data_loaders(config: dict) -> tuple:
             )
             logging.info(f"Splitting data with validation ratio {valid_ratio}")
 
-        train_loader = create_dataloader_from_list(
-            train_data,
-            batch_size=batch_size,
+        train_configs = create_configs_from_list(
+            atoms_list=train_data,
+            key_specification=keyspec,
+        )
+
+        average_atomic_energy_shifts = compute_average_E0s(
+            collections_train=train_configs,
+            z_table= AtomicNumberTable([int(z) for z in range(1, 119)])
+        )
+        train_atomic_data = create_data_from_configs(
+            train_configs,
             r_max=r_max,
             r_max_lr=r_max_lr,
-            key_specification=keyspec,
+        )
+        
+        train_loader = create_dataloader_from_data(
+            config_list=train_atomic_data,
+            batch_size=batch_size,
             shuffle=True,
         )
+        
         num_elements = determine_num_elements(train_loader)
         avg_num_neighbors = compute_avg_num_neighbors(train_loader)
 
@@ -297,6 +334,7 @@ def setup_data_loaders(config: dict) -> tuple:
             {"main": valid_loader},
             avg_num_neighbors,
             num_elements,
+            average_atomic_energy_shifts
         )
 
 
@@ -310,7 +348,29 @@ def set_avg_num_neighbors_in_model(
         layer.euclidean_attention_block.att_norm_inv = avg_num_neighbors
         layer.euclidean_attention_block.att_norm_ev = avg_num_neighbors
 
+def set_atomic_energy_shifts_in_model(
+    model: Union[SO3LR, MultiHeadSO3LR],
+    atomic_energy_shifts: Union[dict, torch.tensor, nn.Parameter]
+) -> None:
+    model.atomic_energy_output_block.set_defined_energy_shifts(
+        atomic_energy_shifts
+    )
 
+        
+        
+def process_config_atomic_energies(
+    atomic_shifts_config: dict,
+):
+    atomic_energy_shifts = {}
+    # turn keys to str if they are int
+    atomic_shifts_config = {str(k): v for k, v in atomic_shifts_config.items()}
+    for z in range(1, 119):
+        if str(z) in atomic_shifts_config:
+            atomic_energy_shifts[z] = atomic_shifts_config[str(z)]
+        else:
+            atomic_energy_shifts[z] = 0.0
+    return atomic_energy_shifts
+    
 def determine_num_elements(data_loader: torch.utils.data.DataLoader) -> int:
     """Determine the number of unique elements in the dataset."""
     unique_elements = set()
@@ -710,7 +770,7 @@ def pretrained_to_mh_model(
     model: torch.nn.Module,
     device_name: str,
 ) -> None:
-    logging.info("Converting pretrained model to multi-head format")
+    logging.info("Converting pretrained model to multi-head format. WARNING: Using provided settings for conversion.")
     num_output_heads = config["ARCHITECTURE"].get("num_output_heads", None)
     assert (
         num_output_heads is not None
@@ -825,15 +885,10 @@ def setup_finetuning(
 
 
 def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
-    dtype_map = {
-        "float32": torch.float32,
-        "float64": torch.float64,
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-    }
-    if dtype_str not in dtype_map:
+
+    if dtype_str not in DTYPE_MAP:
         raise ValueError(f"Unsupported dtype: {dtype_str}")
-    dtype = dtype_map[dtype_str]
+    dtype = DTYPE_MAP[dtype_str]
     # set all model params to dtype
     for param in model.parameters():
         param.data = param.data.to(dtype)
@@ -882,6 +937,9 @@ def run_training(config: dict) -> None:
     logging.Logger.manager.loggerDict.clear()
     setup_logging(config)
 
+    dtype_str = config["GENERAL"].get("default_dtype", "float32")
+    torch.set_default_dtype(DTYPE_MAP[dtype_str])
+    
     # Get pretrained model settings from config
     pretrained_weights = config["TRAINING"].get("pretrained_weights", None)
     pretrained_model = config["TRAINING"].get("pretrained_model", None)
@@ -911,8 +969,7 @@ def run_training(config: dict) -> None:
         # Load complete pretrained model (ignores config architecture)
         model = load_pretrained_model_direct(pretrained_model, device)
         logging.info(
-            "Using complete pretrained model, ignoring config "
-            "architecture settings"
+            "Using complete pretrained model."
         )
         warm_start = True
     else:
@@ -935,11 +992,9 @@ def run_training(config: dict) -> None:
         valid_loaders,
         avg_num_neighbors,
         num_elements,
+        average_atomic_energy_shifts,
     ) = setup_data_loaders(config)
-    set_avg_num_neighbors_in_model(model, avg_num_neighbors)
 
-    # Setup finetuning if specified
-    model = setup_finetuning(config, model, num_elements, device_name)
 
     if warm_start:
         fine_tune_choice = config["TRAINING"].get("finetune_choice", None)
@@ -954,10 +1009,35 @@ def run_training(config: dict) -> None:
                 "Warm starting with non-naive finetuning, "
                 "keeping original avg_num_neighbors"
             )
-
+            avg_num_neighbors = model.avg_num_neighbors
+        atomic_energy_shifts = model.atomic_energy_output_block.energy_shifts
     else:
         model.avg_num_neighbors = avg_num_neighbors
-
+        atomic_shifts_config = config['ARCHITECTURE'].get('atomic_energy_shifts', None)
+        # sort the shifts by atomic number and add all remaining elements as 0
+        if atomic_shifts_config is not None:
+            atomic_energy_shifts = process_config_atomic_energies(
+                atomic_shifts_config
+            )
+            logging.info(
+                "Using provided atomic energy shifts for training."
+            )
+            
+        else:
+            atomic_energy_shifts = average_atomic_energy_shifts
+            logging.info(
+                "Using average atomic energy shifts computed from training data for training."
+            )
+         
+    # Setup finetuning if specified
+    model = setup_finetuning(config, model, num_elements, device_name)
+       
+    logging.info(f"Atomic energy shifts: {atomic_energy_shifts}")
+    set_atomic_energy_shifts_in_model(
+        model, atomic_energy_shifts
+    )
+    set_avg_num_neighbors_in_model(model, avg_num_neighbors)
+    
     set_dtype_model(model, config["GENERAL"].get("default_dtype", "float32"))
 
     # Setup loss function
@@ -1012,7 +1092,6 @@ def run_training(config: dict) -> None:
             "Enabling head selection for multi-head model during training."
         )
         model.select_heads = True
-
     logging.info("Starting training loop...")
     # Start training
     train(

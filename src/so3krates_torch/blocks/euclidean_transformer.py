@@ -25,7 +25,7 @@ class FilterNet(torch.nn.Module):
         assert (
             num_features % 4 == 0
         ), f"num_features {num_features} must be divisible by 4 for the EuclideanTransformer."
-
+        
         self.mlp_rbf = torch.nn.Sequential(
             torch.nn.Linear(
                 in_features=num_radial_basis_fn,
@@ -76,6 +76,21 @@ class FilterNet(torch.nn.Module):
                         non_linearity(),
                     ),
                 )
+
+    def reset_parameters(self):
+        # JAX init (lecun normal)
+        for m in self.mlp_rbf:
+            if isinstance(m, torch.nn.Linear):
+                std = 1.0 / (m.in_features ** 0.5)
+                torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
+        for m in self.mlp_ev:
+            if isinstance(m, torch.nn.Linear):
+                std = 1.0 / (m.in_features ** 0.5)
+                torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
 
     def forward(
         self,
@@ -192,6 +207,23 @@ class EuclideanTransformer(torch.nn.Module):
                     out_features=num_features,
                 ),
             )
+
+    def reset_parameters(self):
+        # JAX init (lecun normal) for MLPs
+        if self.residual_mlp_1:
+            for m in self.mlp_1:
+                if isinstance(m, torch.nn.Linear):
+                    std = 1.0 / (m.in_features ** 0.5)
+                    torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                    if m.bias is not None:
+                        torch.nn.init.zeros_(m.bias)
+        if self.residual_mlp_2:
+            for m in self.mlp_2:
+                if isinstance(m, torch.nn.Linear):
+                    std = 1.0 / (m.in_features ** 0.5)
+                    torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                    if m.bias is not None:
+                        torch.nn.init.zeros_(m.bias)
 
     def forward(
         self,
@@ -341,13 +373,16 @@ class EuclideanAttentionBlock(torch.nn.Module):
                 device=device,
             )
         )
-        # initialize the weights
-        sqrt_5 = math.sqrt(5)
-        torch.nn.init.kaiming_uniform_(self.W_q_inv, a=sqrt_5)
-        torch.nn.init.kaiming_uniform_(self.W_k_inv, a=sqrt_5)
-        torch.nn.init.kaiming_uniform_(self.W_v_inv, a=sqrt_5)
-        torch.nn.init.kaiming_uniform_(self.W_q_ev, a=sqrt_5)
-        torch.nn.init.kaiming_uniform_(self.W_k_ev, a=sqrt_5)
+        # JAX weight init (lecun normal)
+        std_inv = 1.0 / (self.W_q_inv.size(-1) ** 0.5)
+        torch.nn.init.normal_(self.W_q_inv, mean=0.0, std=std_inv)
+        torch.nn.init.normal_(self.W_k_inv, mean=0.0, std=std_inv)
+        torch.nn.init.normal_(self.W_v_inv, mean=0.0, std=std_inv)
+    
+        std_ev = 1.0 / (self.W_q_ev.size(-1) ** 0.5)
+        torch.nn.init.normal_(self.W_q_ev, mean=0.0, std=std_ev)
+        torch.nn.init.normal_(self.W_k_ev, mean=0.0, std=std_ev)
+        
 
         # normalization for attention weights
         # Eq. 21 https://doi.org/10.1038/s41467-024-50620-6
@@ -533,6 +568,15 @@ class InteractionBlock(torch.nn.Module):
         self.degree_repeats = torch.tensor(
             [2 * y + 1 for y in degrees],
         ).to(device)
+
+    def reset_parameters(self):
+        # JAX init (lecun normal)
+        for m in self.linear_layer:
+            if isinstance(m, torch.nn.Linear):
+                std = 1.0 / (m.in_features ** 0.5)
+                torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
 
     def forward(
         self,

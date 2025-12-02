@@ -8,7 +8,7 @@ import numpy as np
 import pickle
 from so3krates_torch.modules.models import So3krates, SO3LR
 import yaml
-
+import torch.nn as nn
 
 def flatten_params(params, prefix=""):
     flat_params = {}
@@ -277,7 +277,7 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
     )
     if energy_learn_atomic_type_shifts:
         mapping["params/observables_0/energy_offset"] = (
-            "atomic_energy_output_block.energy_shifts.weight"
+            "atomic_energy_output_block.energy_shifts"
         )
     if energy_learn_atomic_type_scales:
         mapping["params/observables_0/atomic_scales"] = (
@@ -433,8 +433,11 @@ def convert_flax_to_torch_params(
             flax_key == "params/observables_0/energy_offset"
             or flax_key == "params/observables_0/atomic_scales"
         ):
-            torched = torched[1:].unsqueeze(0)
-
+            
+            if torch_key == "atomic_energy_output_block.energy_shifts":
+                torched = torched[1:]
+            else:
+                torched = torched[1:].unsqueeze(0)
         if torched.shape != expected_shape:
             print(
                 f"Shape mismatch for {torch_key}: expected {expected_shape}, got {torched.shape}"
@@ -469,6 +472,21 @@ def convert_flax_to_torch(
         trainable_rbf=trainable_rbf,
         dtype=dtype,
     )
+    if hasattr(cfg.data, "energy_shifts"):
+        energy_shifts_dict = cfg.data.energy_shifts.to_dict()
+        # turn keys in to float, sort and then back to str
+        
+        energy_shifts_dict = {
+            int(k): v for k, v in energy_shifts_dict.items()
+        }
+        energy_shifts_dict = dict(
+            sorted(energy_shifts_dict.items(), key=lambda item: item[0])
+        )
+        energy_shifts_dict.pop(0, None)
+        energy_shifts_dict = {
+            str(k): v for k, v in energy_shifts_dict.items()
+        }
+        
     if save_torch_settings:
         serializable_settings = torch_model_settings.copy()
         if cfg.model.electrostatic_energy_bool is False:
@@ -477,10 +495,13 @@ def convert_flax_to_torch(
             serializable_settings["dispersion_energy_bool"] = False
         if cfg.model.zbl_repulsion_bool is False:
             serializable_settings["zbl_repulsion_bool"] = False
-            
         serializable_settings["dtype"] = str(
             dtype
         )  # Convert torch.dtype to string
+        
+        if hasattr(cfg.data, "energy_shifts"):
+            serializable_settings["atomic_type_shifts"] = energy_shifts_dict
+            
         settings_to_save = {
             "ARCHITECTURE": serializable_settings
         }
@@ -489,17 +510,36 @@ def convert_flax_to_torch(
 
     if so3lr:
         torch_model = SO3LR(**torch_model_settings)
+        torch_model.electrostatic_energy_bool = cfg.model.electrostatic_energy_bool
+        torch_model.dispersion_energy_bool = cfg.model.dispersion_energy_bool
+        torch_model.zbl_repulsion_bool = cfg.model.zbl_repulsion_bool
+        if not cfg.model.electrostatic_energy_bool and not cfg.model.dispersion_energy_bool:
+            torch_model.use_lr = False
     else:
         torch_model = So3krates(**torch_model_settings)
 
+    state_dict = torch_model.state_dict()
+    
     torch_state_dict = convert_flax_to_torch_params(
-        torch_state_dict=torch_model.state_dict(),
+        torch_state_dict=state_dict,
         flax_params=flax_params,
         mapping=get_flax_to_torch_mapping(
             cfg=cfg, trainable_rbf=trainable_rbf
         ),
         dtype=dtype,
     )
+    
+    if hasattr(cfg.data, "energy_shifts"):
+        torch_state_dict[
+            "atomic_energy_output_block.energy_shifts"
+        ] = nn.Parameter(
+            torch.tensor(
+                list(energy_shifts_dict.values()),
+                dtype=torch.get_default_dtype(),
+                requires_grad=False,
+            )
+        )
+    
     if torch_save_path:
         torch.save(torch_state_dict, torch_save_path)
     torch_model.load_state_dict(torch_state_dict)
@@ -752,14 +792,12 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
     mapping["atomic_energy_output_block.final_layer.bias"] = (
         "params/observables_0/energy_dense_final/bias"
     )
-    if energy_learn_atomic_type_shifts:
-        mapping["atomic_energy_output_block.energy_shifts.weight"] = (
-            "params/observables_0/energy_offset"
-        )
-    if energy_learn_atomic_type_scales:
-        mapping["atomic_energy_output_block.energy_scales.weight"] = (
-            "params/observables_0/atomic_scales"
-        )
+    mapping["atomic_energy_output_block.energy_shifts"] = (
+        "params/observables_0/energy_offset"
+    )
+    mapping["atomic_energy_output_block.energy_scales.weight"] = (
+        "params/observables_0/atomic_scales"
+    )
 
     params_obs = "params/observables_0/"
     #if use_zbl:
@@ -970,7 +1008,10 @@ def convert_torch_to_flax_params(
             or flax_key == "params/observables_0/atomic_scales"
         ):
             # Remove unsqueeze dimension and add padding at beginning
-            numpy_array = numpy_array.squeeze(0)  # Remove the (1,) dimension
+            if "energy_shifts" in torch_key:
+                numpy_array = numpy_array.squeeze()  # Remove extra dimensions
+            else:
+                numpy_array = numpy_array.squeeze(0)  # Remove the (1,) dimension
             padding = np.zeros((1,), dtype=numpy_array.dtype)
             numpy_array = np.concatenate([padding, numpy_array], axis=0)
 
@@ -1004,7 +1045,20 @@ def convert_torch_to_flax(
     """
     # Convert torch settings to flax config
     cfg = get_model_settings_torch_to_flax(torch_settings)
+    
+    energy_shifts = torch_state_dict.get("atomic_energy_output_block.energy_shifts", None)
 
+    # turn energy_shifts into dict:
+    energy_shifts_dict = {
+        0: 0.0,  # padding for atomic number 0
+    }
+    for i in range(1, 119):
+        if energy_shifts is not None:
+            energy_shifts_dict[i] = energy_shifts[i-1].item()
+        else:
+            energy_shifts_dict[i] = 0.0
+    cfg.data.energy_shifts = config_dict.ConfigDict(energy_shifts_dict)
+        
     # Get the parameter mapping
     mapping = get_torch_to_flax_mapping(cfg, trainable_rbf)
 

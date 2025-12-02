@@ -506,7 +506,6 @@ class SO3LR(So3krates):
         self.dispersion_potential = DispersionInteraction(
             neighborlist_format_lr=self.neighborlist_format_lr
         )
-
     def _get_graph(
         self,
         data: Dict[str, torch.Tensor],

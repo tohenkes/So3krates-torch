@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import math
 from so3krates_torch.tools import scatter
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Union
 
 
 class AtomicEnergyOutputHead(nn.Module):
@@ -55,16 +55,19 @@ class AtomicEnergyOutputHead(nn.Module):
         self.energy_learn_atomic_type_shifts = energy_learn_atomic_type_shifts
         self.energy_learn_atomic_type_scales = energy_learn_atomic_type_scales
 
-        if self.energy_learn_atomic_type_shifts:
-            self.energy_shifts = nn.Linear(
-                num_elements, 1, bias=False, dtype=torch.get_default_dtype()
-            )
-            nn.init.zeros_(self.energy_shifts.weight)
-        if self.energy_learn_atomic_type_scales:
-            self.energy_scales = nn.Linear(
-                num_elements, 1, bias=False, dtype=torch.get_default_dtype()
-            )
-            nn.init.ones_(self.energy_scales.weight)
+        self.energy_shifts = nn.Parameter(
+            torch.zeros(
+                num_elements, dtype=torch.get_default_dtype(),
+                 device=device
+            ),
+            requires_grad=False,
+        )
+        self.energy_scales = nn.Linear(
+            num_elements,1, bias=False, dtype=torch.get_default_dtype(),
+            device=device
+        )
+        nn.init.ones_(self.energy_scales.weight)
+        self.energy_scales.weight.requires_grad = False
 
         self.use_defined_shifts = False
         if atomic_type_shifts is not None:
@@ -85,6 +88,7 @@ class AtomicEnergyOutputHead(nn.Module):
                     list(atomic_type_shifts.values()),
                     dtype=torch.get_default_dtype(),
                     requires_grad=False,
+                    device=device,
                 )
             )
 
@@ -92,18 +96,56 @@ class AtomicEnergyOutputHead(nn.Module):
                 atomic_type_shifts=atomic_type_shifts
             )
 
+
+        self.enable_learned_energy_shifts_and_scales()
+        
     def set_defined_energy_shifts(
             self,
-            atomic_type_shifts: Optional[Dict[str, float]]
+            atomic_type_shifts: Union[Dict[str, float], torch.Tensor, nn.Parameter]
             ):
-        self.energy_shifts = nn.Parameter(
-            torch.tensor(
-                list(atomic_type_shifts.values()),
-                dtype=torch.get_default_dtype(),
+        if isinstance(atomic_type_shifts, dict):
+            self.energy_shifts = nn.Parameter(
+                torch.tensor(
+                    list(atomic_type_shifts.values()),
+                    dtype=torch.get_default_dtype(),
+                    requires_grad=False,
+                )
+            )
+        elif isinstance(atomic_type_shifts, torch.Tensor) or isinstance(atomic_type_shifts, nn.Parameter):
+            self.energy_shifts = nn.Parameter(
+                atomic_type_shifts.to(
+                    dtype=torch.get_default_dtype()
+                ),
                 requires_grad=False,
             )
-        )
+        else:
+            raise ValueError(
+                "atomic_type_shifts must be either a dict, torch.Tensor, or nn.Parameter."
+            )
+        self.enable_learned_energy_shifts_and_scales()
+        
+        
+    def enable_learned_energy_shifts_and_scales(self):
+        if self.energy_learn_atomic_type_shifts:
+            self.energy_shifts.requires_grad = True
+        if self.energy_learn_atomic_type_scales:
+            self.energy_scales.weight.requires_grad = True
 
+    def reset_parameters(self):
+        # JAX init (lecun normal)
+        for m in self.layers:
+            if isinstance(m, torch.nn.Linear):
+                std = 1.0 / (m.in_features ** 0.5)
+                torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
+        # Final layer
+        m = self.final_layer
+        if isinstance(m, torch.nn.Linear):
+            std = 1.0 / (m.in_features ** 0.5)
+            torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
 
     def forward(
         self,
@@ -120,17 +162,12 @@ class AtomicEnergyOutputHead(nn.Module):
         atomic_energies = self.final_layer(inv_features)
         if self.final_non_linearity:
             atomic_energies = self.non_linearity(inv_features)
+            
+        one_hot = data["node_attrs"]
+        atomic_number_idx = torch.argmax(one_hot, dim=1)
+        atomic_energies += self.energy_shifts[atomic_number_idx].unsqueeze(1)
+        atomic_energies *= self.energy_scales(data["node_attrs"])
 
-        if self.energy_learn_atomic_type_shifts:
-            atomic_energies += self.energy_shifts(data["node_attrs"])
-        if self.energy_learn_atomic_type_scales:
-            atomic_energies *= self.energy_scales(data["node_attrs"])
-        if self.use_defined_shifts:
-            assert (
-                atomic_numbers is not None
-            ), "If use_defined_shifts is True, atomic_numbers must be provided."
-            atomic_indices = atomic_numbers - 1
-            atomic_energies += self.energy_shifts[atomic_indices].unsqueeze(1)
 
         return atomic_energies
 
@@ -190,8 +227,12 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                     device=device,
                 )
             )
-            nn.init.kaiming_uniform_(multi_head_weights, a=math.sqrt(5))
-            nn.init.zeros_(multi_head_bias)
+            
+            # JAX init (lecun normal)
+            std = 1.0 / (multi_head_weights.size(1) ** 0.5)
+            torch.nn.init.normal_(multi_head_weights, mean=0.0, std=std)
+            torch.nn.init.zeros_(multi_head_bias)
+            
             self.layers_weights.append(multi_head_weights)
             self.layers_bias.append(multi_head_bias)
 
@@ -212,29 +253,63 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                 device=device,
             )
         )
-        nn.init.kaiming_uniform_(multi_head_final_weights, a=math.sqrt(5))
-        nn.init.zeros_(multi_head_final_bias)
+        
+        # JAX init (lecun normal)
+        std = 1.0 / (multi_head_final_weights.size(1) ** 0.5)
+        torch.nn.init.normal_(multi_head_final_weights, mean=0.0, std=std)
+        torch.nn.init.zeros_(multi_head_final_bias)
+        
         self.final_layer_weights = multi_head_final_weights
         self.final_layer_bias = multi_head_final_bias
 
+        # Override parent class initialization for multi-head support
+        # Initialize energy_shifts for all heads with zeros (or defined shifts)
+        self.energy_shifts = nn.Parameter(
+            torch.zeros(
+                num_elements, dtype=torch.get_default_dtype(),
+                device=device
+            ),
+            requires_grad=False,
+        )
+        
+        # Initialize energy_scales for all heads
+        self.energy_scales = nn.Parameter(
+            torch.ones(
+                num_elements, 1, dtype=torch.get_default_dtype(),
+                device=device
+            ),
+            requires_grad=False,
+        )
+        
+        # Handle defined atomic type shifts (same for all heads)
+        if atomic_type_shifts is not None:
+            # Remove element zero if present
+            if atomic_type_shifts.get("0") is not None:
+                atomic_type_shifts.pop("0")
+            if num_elements is not None:
+                assert len(atomic_type_shifts) == num_elements
+            # Sort atomic_type_shifts based on element number (keys)
+            atomic_type_shifts = {
+                k: atomic_type_shifts[k]
+                for k in sorted(atomic_type_shifts.keys())
+            }
+            self.energy_shifts = nn.Parameter(
+                torch.tensor(
+                    list(atomic_type_shifts.values()),
+                    dtype=torch.get_default_dtype(),
+                    device=device,
+                ),
+                requires_grad=False,
+            )
+        
+        # Enable gradient if requested
+        self.enable_learned_energy_shifts_and_scales()
+
+    def enable_learned_energy_shifts_and_scales(self):
         if self.energy_learn_atomic_type_shifts:
-            self.energy_shifts = torch.nn.Parameter(
-                torch.zeros(
-                    self.num_output_heads,
-                    num_elements,
-                    dtype=torch.get_default_dtype(),
-                    device=device,
-                )
-            )
+            self.energy_shifts.requires_grad = True
         if self.energy_learn_atomic_type_scales:
-            self.energy_scales = torch.nn.Parameter(
-                torch.ones(
-                    self.num_output_heads,
-                    num_elements,
-                    dtype=torch.get_default_dtype(),
-                    device=device,
-                )
-            )
+            self.energy_scales.requires_grad = True
 
     def forward(
         self,
@@ -261,25 +336,16 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
         if self.final_non_linearity:
             atomic_energies = self.non_linearity(atomic_energies)
 
-        if self.energy_learn_atomic_type_shifts:
 
-            atomic_energies += torch.einsum(
-                "ne, he -> nh", data["node_attrs"], self.energy_shifts
-            ).unsqueeze(-1)
+        one_hot = data["node_attrs"]
+        atomic_number_idx = torch.argmax(one_hot, dim=1)
+        atomic_energies += self.energy_shifts[atomic_number_idx].view(-1, 1, 1)
 
-        if self.energy_learn_atomic_type_scales:
-            atomic_energies *= torch.einsum(
-                "ne, he -> nh", data["node_attrs"], self.energy_scales
-            ).unsqueeze(-1)
 
-        if self.use_defined_shifts:
-            assert (
-                atomic_numbers is not None
-            ), "If use_defined_shifts is True, atomic_numbers must be provided."
-            atomic_indices = atomic_numbers - 1
-            atomic_energies += (
-                self.energy_shifts[atomic_indices].unsqueeze(0).unsqueeze(2)
-            )
+        one_hot = data["node_attrs"]
+        scales = torch.matmul(one_hot, self.energy_scales)
+        atomic_energies *= scales.view(-1, 1, 1)
+
         return atomic_energies.squeeze(
             0
         )  # shape: (num_nodes, num_heads, final_output_features)
@@ -311,6 +377,26 @@ class PartialChargesOutputHead(nn.Module):
             )
         else:
             self.transform_inv_features = nn.Linear(num_features, 1)
+
+    def reset_parameters(self):
+        # JAX init (lecun normal) - embedding
+        std = 1.0 / (self.atomic_embedding.embedding_dim ** 0.5)
+        torch.nn.init.normal_(self.atomic_embedding.weight, mean=0.0, std=std)
+        # JAX init (lecun normal) - linear layers
+        if isinstance(self.transform_inv_features, nn.Sequential):
+            for m in self.transform_inv_features:
+                if isinstance(m, torch.nn.Linear):
+                    std = 1.0 / (m.in_features ** 0.5)
+                    torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                    if m.bias is not None:
+                        torch.nn.init.zeros_(m.bias)
+        else:
+            m = self.transform_inv_features
+            if isinstance(m, torch.nn.Linear):
+                std = 1.0 / (m.in_features ** 0.5)
+                torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
 
     def forward(
         self,
@@ -401,6 +487,28 @@ class HirshfeldOutputHead(nn.Module):
             self.transform_features = nn.Linear(
                 num_features, num_features // 2
             )
+
+    def reset_parameters(self):
+        # JAX init (lecun normal) - embeddings
+        std = 1.0 / (self.v_shift_embedding.embedding_dim ** 0.5)
+        torch.nn.init.normal_(self.v_shift_embedding.weight, mean=0.0, std=std)
+        std = 1.0 / (self.q_embedding.embedding_dim ** 0.5)
+        torch.nn.init.normal_(self.q_embedding.weight, mean=0.0, std=std)
+        # JAX init (lecun normal) - linear layers
+        if isinstance(self.transform_features, nn.Sequential):
+            for m in self.transform_features:
+                if isinstance(m, torch.nn.Linear):
+                    std = 1.0 / (m.in_features ** 0.5)
+                    torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                    if m.bias is not None:
+                        torch.nn.init.zeros_(m.bias)
+        else:
+            m = self.transform_features
+            if isinstance(m, torch.nn.Linear):
+                std = 1.0 / (m.in_features ** 0.5)
+                torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
 
     def forward(
         self,
