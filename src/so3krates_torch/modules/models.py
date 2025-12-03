@@ -219,6 +219,7 @@ class So3krates(torch.nn.Module):
             energy_learn_atomic_type_shifts=self.energy_learn_atomic_type_shifts,
             energy_learn_atomic_type_scales=self.energy_learn_atomic_type_scales,
             num_elements=self.num_elements,
+            device=self.device,
         )
 
     def _get_graph(
@@ -779,6 +780,7 @@ class MultiHeadSO3LR(SO3LR):
             energy_learn_atomic_type_scales=self.energy_learn_atomic_type_scales,
             num_elements=self.num_elements,
             num_output_heads=self.num_output_heads,
+            device=self.device,
         )
         self.select_heads = False
         self.return_mean = False

@@ -23,6 +23,7 @@ class AtomicEnergyOutputHead(nn.Module):
         device: str = "cpu",
     ):
         super().__init__()
+        self.device = device
         self.layers = nn.ModuleList()
         if energy_regression_dim is None:
             energy_regression_dim = num_features
@@ -58,13 +59,13 @@ class AtomicEnergyOutputHead(nn.Module):
         self.energy_shifts = nn.Parameter(
             torch.zeros(
                 num_elements, dtype=torch.get_default_dtype(),
-                 device=device
+                device=self.device
             ),
             requires_grad=False,
         )
         self.energy_scales = nn.Linear(
             num_elements,1, bias=False, dtype=torch.get_default_dtype(),
-            device=device
+            device=self.device
         )
         nn.init.ones_(self.energy_scales.weight)
         self.energy_scales.weight.requires_grad = False
@@ -88,7 +89,7 @@ class AtomicEnergyOutputHead(nn.Module):
                     list(atomic_type_shifts.values()),
                     dtype=torch.get_default_dtype(),
                     requires_grad=False,
-                    device=device,
+                    device=self.device,
                 )
             )
 
@@ -109,6 +110,7 @@ class AtomicEnergyOutputHead(nn.Module):
                     list(atomic_type_shifts.values()),
                     dtype=torch.get_default_dtype(),
                     requires_grad=False,
+                    device=self.device,
                 )
             )
         elif isinstance(atomic_type_shifts, torch.Tensor) or isinstance(atomic_type_shifts, nn.Parameter):
@@ -117,6 +119,7 @@ class AtomicEnergyOutputHead(nn.Module):
                     dtype=torch.get_default_dtype()
                 ),
                 requires_grad=False,
+                device=self.device,
             )
         else:
             raise ValueError(
