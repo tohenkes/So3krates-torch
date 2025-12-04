@@ -121,7 +121,7 @@ def main():
     argparser.add_argument("--device", type=str, default="cuda")
     argparser.add_argument("--batch_size", type=int, default=5)
     argparser.add_argument("--model_type", type=str, default="so3lr")
-    argparser.add_argument("--r_max_lr", type=float, default=12.0)
+    argparser.add_argument("--r_max_lr", type=float, default=None)
     argparser.add_argument(
         "--multispecies", action="store_true", default=False
     )

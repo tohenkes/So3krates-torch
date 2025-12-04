@@ -871,6 +871,12 @@ def setup_finetuning(
                     "freeze_embedding", True
                 ),
                 freeze_zbl=config["TRAINING"].get("freeze_zbl", True),
+                freeze_hirshfeld=config["TRAINING"].get(
+                    "freeze_hirshfeld", True
+                ),
+                freeze_partial_charges=config["TRAINING"].get(
+                    "freeze_partial_charges", True
+                ),
             )
         use_eletrostatics = model.electrostatic_energy_bool
         use_dispersion = model.dispersion_energy_bool

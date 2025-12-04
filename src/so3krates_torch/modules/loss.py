@@ -24,7 +24,7 @@ def weighted_mean_squared_error_hirshfeld(
     raw_loss = (
         configs_weight
         * configs_forces_weight
-        * torch.square(ref["forces"] - pred["forces"])
+        * torch.square(ref["hirshfeld_ratios"] - pred["hirshfeld_ratios"])
     )
     return reduce_loss(raw_loss, ddp)
 
