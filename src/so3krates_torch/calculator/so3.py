@@ -44,7 +44,7 @@ class TorchkratesCalculator(Calculator):
         default_dtype="",
         charges_key="charges",
         key_specification: Optional[KeySpecification] = None,
-        model_type="SO3LR",
+        model_type="so3lr",
         fullgraph=True,
         **kwargs,
     ):
@@ -75,9 +75,9 @@ class TorchkratesCalculator(Calculator):
 
         self.compute_stress = compute_stress
 
-        self.model_type = model_type
+        self.model_type = model_type.lower()
 
-        if model_type == "SO3LR":
+        if self.model_type == "so3lr":
             self.implemented_properties = [
                 "energy",
                 "forces",
@@ -134,16 +134,16 @@ class TorchkratesCalculator(Calculator):
         if self.num_models > 1:
             print(f"Running committee with {self.num_models} models")
 
-            if model_type in ["SO3LR", "So3krates"]:
+            if self.model_type in ["so3lr", "so3krates"]:
                 self.implemented_properties.extend(
                     ["energies", "energy_var", "forces_comm", "stress_var"]
                 )
-            elif model_type == "SO3LR":
+            elif self.model_type == "so3lr":
                 self.implemented_properties.extend(
                     ["dipole_var", "hirshfeld_var", "partial_charges_var"]
                 )
 
-        if model_type == "SO3LR":
+        if self.model_type == "so3lr":
             for model in self.models:
                 model.dispersion_energy_cutoff_lr_damping = (
                     dispersion_energy_cutoff_lr_damping
@@ -192,7 +192,7 @@ class TorchkratesCalculator(Calculator):
         self, model_type: str, num_models: int, num_atoms: int
     ) -> dict:
         dict_of_tensors = {}
-        if model_type in ["SO3LR", "So3krates"]:
+        if model_type in ["so3lr", "so3krates"]:
             energies = torch.zeros(num_models, device=self.device)
             node_energy = torch.zeros(
                 num_models, num_atoms, device=self.device
@@ -207,7 +207,7 @@ class TorchkratesCalculator(Calculator):
                     "stress": stress,
                 }
             )
-        if model_type in ["SO3LR"]:
+        if model_type in ["so3lr"]:
             dipole = torch.zeros(num_models, 3, device=self.device)
             partial_charges = torch.zeros(
                 num_models, num_atoms, device=self.device
@@ -224,7 +224,7 @@ class TorchkratesCalculator(Calculator):
             )
         return dict_of_tensors
 
-    def _atoms_to_batch(self, atoms):
+    def _atoms_to_batch(self, atoms, batch_size=1):
         self.key_specification.update(arrays_keys={self.charges_key: "Qs"})
 
         config = data.config_from_atoms(
@@ -241,7 +241,7 @@ class TorchkratesCalculator(Calculator):
                     ),
                 )
             ],
-            batch_size=1,
+            batch_size=batch_size,
             shuffle=False,
             drop_last=False,
         )
@@ -277,13 +277,13 @@ class TorchkratesCalculator(Calculator):
                 batch.to_dict(),
                 compute_stress=self.compute_stress,
             )
-            if self.model_type in ["SO3LR", "So3krates"]:
+            if self.model_type in ["so3lr", "so3krates"]:
                 ret_tensors["energies"][i] = out["energy"].detach()
                 ret_tensors["forces"][i] = out["forces"].detach()
                 if out["stress"] is not None:
                     ret_tensors["stress"][i] = out["stress"].detach()
 
-            if self.model_type in ["SO3LR"]:
+            if self.model_type in ["so3lr"]:
                 if out["dipole"] is not None:
                     ret_tensors["dipole"][i] = out["dipole"].detach()
                 if out["partial_charges"] is not None:
@@ -296,7 +296,7 @@ class TorchkratesCalculator(Calculator):
                 ].detach()
 
         self.results = {}
-        if self.model_type in ["SO3LR", "So3krates"]:
+        if self.model_type in ["so3lr", "so3krates"]:
             self.results["energy"] = (
                 torch.mean(ret_tensors["energies"], dim=0).cpu().item()
                 * self.energy_units_to_eV
@@ -338,7 +338,7 @@ class TorchkratesCalculator(Calculator):
                         / self.length_units_to_A**3
                     )
 
-        if self.model_type in ["SO3LR"]:
+        if self.model_type in ["so3lr"]:
             self.results["dipole"] = (
                 torch.mean(ret_tensors["dipole"], dim=0).cpu().numpy()
             )
@@ -449,7 +449,7 @@ class SO3LRCalculator(TorchkratesCalculator):
             default_dtype=default_dtype,
             charges_key=charges_key,
             key_specification=key_specification,
-            model_type="SO3LR",
+            model_type="so3lr",
             **kwargs,
         )
 

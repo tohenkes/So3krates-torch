@@ -156,7 +156,6 @@ class AtomicEnergyOutputHead(nn.Module):
         data: Dict[str, torch.Tensor],
         atomic_numbers: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-
         for layer in self.layers:
             inv_features = layer(inv_features)
             if self.use_non_linearity:

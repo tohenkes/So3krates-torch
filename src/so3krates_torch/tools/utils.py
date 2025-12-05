@@ -56,7 +56,14 @@ def compute_forces_virials(
     return -1 * forces, -1 * virials, stress
 
 
-def compute_multihead_forces(energy, positions, batch, training=True):
+def compute_multihead_forces_stress(
+    energy,
+    positions,
+    displacement,
+    cell: torch.Tensor,
+    training=True,
+    compute_stress: bool = False,
+    ):
     num_graphs, num_heads = energy.shape
     # change shape to [num_heads,num_graphs]
     energy_for_grad = energy.view(num_graphs, num_heads).permute(1, 0)
@@ -76,7 +83,58 @@ def compute_multihead_forces(energy, positions, batch, training=True):
         -1, -1, num_graphs
     )
 
-    grad_all = torch.autograd.grad(
+    forces_pos, virials = torch.autograd.grad(
+        outputs=[energy_for_grad],
+        inputs=[positions, displacement],
+        grad_outputs=grad_outputs,
+        retain_graph=training,
+        create_graph=training,
+        allow_unused=True,
+        is_grads_batched=True,  # treat the first dim (heads) as batch
+    )
+    forces = -forces_pos
+
+    # virials shape: [num_heads, batch, 3, 3]
+    # cell shape : [batch, 3, 3]
+    if compute_stress and virials is not None:
+        cell = cell.view(-1, 3, 3)
+        volume = torch.linalg.det(cell).abs().unsqueeze(-1)
+        stress = virials / volume.view(1,-1, 1, 1)
+        stress = torch.where(
+            torch.abs(stress) < 1e10, stress, torch.zeros_like(stress)
+        )
+    if forces is None:
+        forces = torch.zeros_like(positions)
+    if virials is None:
+        virials = torch.zeros((1, 3, 3))
+    return forces, virials, stress
+
+def compute_multihead_forces(
+    energy,
+    positions,
+    batch, 
+    training=True
+    ):
+    num_graphs, num_heads = energy.shape
+    # change shape to [num_heads,num_graphs]
+    energy_for_grad = energy.view(num_graphs, num_heads).permute(1, 0)
+    grad_outputs = torch.zeros(
+        num_heads,
+        num_heads,
+        num_graphs,
+        device=energy.device,
+        dtype=energy.dtype,
+    )
+    # picks the gradient for a specific head
+    eye_for_heads = torch.eye(
+        num_heads, device=energy.device, dtype=energy.dtype
+    )
+    # picks the gradient for a specific graph and head
+    grad_outputs[:, :, :] = eye_for_heads.unsqueeze(-1).expand(
+        -1, -1, num_graphs
+    )
+
+    forces_pos = torch.autograd.grad(
         outputs=[energy_for_grad],
         inputs=[positions],
         grad_outputs=grad_outputs,
@@ -85,7 +143,7 @@ def compute_multihead_forces(energy, positions, batch, training=True):
         allow_unused=True,
         is_grads_batched=True,  # treat the first dim (heads) as batch
     )[0]
-    forces = -grad_all
+    forces = -forces_pos
     return forces
 
 
@@ -111,14 +169,27 @@ def get_outputs(
     Optional[torch.Tensor],
 ]:
     if (compute_virials or compute_stress) and displacement is not None:
-        forces, virials, stress = compute_forces_virials(
-            energy=energy,
-            positions=positions,
-            displacement=displacement,
-            cell=cell,
-            compute_stress=compute_stress,
-            training=(training or compute_hessian or compute_edge_forces),
-        )
+        if is_multihead:
+            forces, virials, stress = compute_multihead_forces_stress(
+                energy=energy,
+                positions=positions,
+                displacement=displacement,
+                cell=cell,
+                compute_stress=compute_stress,
+                training=(
+                    training or compute_hessian or compute_edge_forces
+                ),
+            )
+        else:
+            forces, virials, stress = compute_forces_virials(
+                energy=energy,
+                positions=positions,
+                displacement=displacement,
+                cell=cell,
+                compute_stress=compute_stress,
+                training=(training or compute_hessian or compute_edge_forces),
+            )
+            
     elif compute_force:
         if is_multihead:
             forces, virials, stress = (
