@@ -83,7 +83,7 @@ def compute_multihead_forces_stress(
         -1, -1, num_graphs
     )
 
-    forces_pos, virials = torch.autograd.grad(
+    forces, virials = torch.autograd.grad(
         outputs=[energy_for_grad],
         inputs=[positions, displacement],
         grad_outputs=grad_outputs,
@@ -92,7 +92,6 @@ def compute_multihead_forces_stress(
         allow_unused=True,
         is_grads_batched=True,  # treat the first dim (heads) as batch
     )
-    forces = -forces_pos
 
     # virials shape: [num_heads, batch, 3, 3]
     # cell shape : [batch, 3, 3]
@@ -103,11 +102,7 @@ def compute_multihead_forces_stress(
         stress = torch.where(
             torch.abs(stress) < 1e10, stress, torch.zeros_like(stress)
         )
-    if forces is None:
-        forces = torch.zeros_like(positions)
-    if virials is None:
-        virials = torch.zeros((1, 3, 3))
-    return forces, virials, stress
+    return -1 * forces, -1 * virials, stress
 
 def compute_multihead_forces(
     energy,
