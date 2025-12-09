@@ -294,83 +294,11 @@ class TorchkratesCalculator(Calculator):
                     ret_tensors["hirshfeld_ratios"][i] = out[
                         "hirshfeld_ratios"
                 ].detach()
-
-        self.results = {}
-        if self.model_type in ["so3lr", "so3krates"]:
-            self.results["energy"] = (
-                torch.mean(ret_tensors["energies"], dim=0).cpu().item()
-                * self.energy_units_to_eV
+        self._process_results(
+            ret_tensors=ret_tensors,
+            out=out,
+            multi_output=self.num_models > 1,
             )
-            self.results["free_energy"] = self.results["energy"]
-            self.results["forces"] = (
-                torch.mean(ret_tensors["forces"], dim=0).cpu().numpy()
-                * self.energy_units_to_eV
-                / self.length_units_to_A
-            )
-            if self.num_models > 1:
-                self.results["energies"] = (
-                    ret_tensors["energies"].cpu().numpy()
-                    * self.energy_units_to_eV
-                )
-                self.results["energy_var"] = (
-                    torch.var(ret_tensors["energies"], dim=0, unbiased=False)
-                    .cpu()
-                    .item()
-                    * self.energy_units_to_eV
-                )
-                self.results["forces_comm"] = (
-                    ret_tensors["forces"].cpu().numpy()
-                    * self.energy_units_to_eV
-                    / self.length_units_to_A
-                )
-            if out["stress"] is not None:
-                self.results["stress"] = full_3x3_to_voigt_6_stress(
-                    torch.mean(ret_tensors["stress"], dim=0).cpu().numpy()
-                    * self.energy_units_to_eV
-                    / self.length_units_to_A**3
-                )
-                if self.num_models > 1:
-                    self.results["stress_var"] = full_3x3_to_voigt_6_stress(
-                        torch.var(ret_tensors["stress"], dim=0, unbiased=False)
-                        .cpu()
-                        .numpy()
-                        * self.energy_units_to_eV
-                        / self.length_units_to_A**3
-                    )
-
-        if self.model_type in ["so3lr"]:
-            self.results["dipole"] = (
-                torch.mean(ret_tensors["dipole"], dim=0).cpu().numpy()
-            )
-            self.results["partial_charges"] = (
-                torch.mean(ret_tensors["partial_charges"], dim=0).cpu().numpy()
-            )
-            self.results["hirshfeld_ratios"] = (
-                torch.mean(ret_tensors["hirshfeld_ratios"], dim=0)
-                .cpu()
-                .numpy()
-            )
-
-            if self.num_models > 1:
-                self.results["dipole_var"] = (
-                    torch.var(ret_tensors["dipole"], dim=0, unbiased=False)
-                    .cpu()
-                    .numpy()
-                )
-                self.results["partial_charges_var"] = (
-                    torch.var(
-                        ret_tensors["partial_charges"], dim=0, unbiased=False
-                    )
-                    .cpu()
-                    .numpy()
-                )
-                self.results["hirshfeld_ratios_var"] = (
-                    torch.var(
-                        ret_tensors["hirshfeld_ratios"], dim=0, unbiased=False
-                    )
-                    .cpu()
-                    .numpy()
-                )
 
     def get_hessian(self, atoms=None):
         if atoms is None and self.atoms is None:
@@ -415,6 +343,89 @@ class TorchkratesCalculator(Calculator):
                 "invariant_features": invariants,
                 "equivariant_features": equivariants,
             }
+
+    def _process_results(
+        self,
+        ret_tensors: dict,
+        out: dict,
+        multi_output: bool = False
+    ):
+        self.results = {}
+        if self.model_type in ["so3lr", "so3krates"]:
+            self.results["energy"] = (
+                torch.mean(ret_tensors["energies"], dim=0).cpu().item()
+                * self.energy_units_to_eV
+            )
+            self.results["free_energy"] = self.results["energy"]
+            self.results["forces"] = (
+                torch.mean(ret_tensors["forces"], dim=0).cpu().numpy()
+                * self.energy_units_to_eV
+                / self.length_units_to_A
+            )
+            if multi_output:
+                self.results["energies"] = (
+                    ret_tensors["energies"].cpu().numpy()
+                    * self.energy_units_to_eV
+                )
+                self.results["energy_var"] = (
+                    torch.var(ret_tensors["energies"], dim=0, unbiased=False)
+                    .cpu()
+                    .item()
+                    * self.energy_units_to_eV
+                )
+                self.results["forces_comm"] = (
+                    ret_tensors["forces"].cpu().numpy()
+                    * self.energy_units_to_eV
+                    / self.length_units_to_A
+                )
+            if out["stress"] is not None:
+                self.results["stress"] = full_3x3_to_voigt_6_stress(
+                    torch.mean(ret_tensors["stress"], dim=0).cpu().numpy()
+                    * self.energy_units_to_eV
+                    / self.length_units_to_A**3
+                )
+                if multi_output:
+                    self.results["stress_var"] = full_3x3_to_voigt_6_stress(
+                        torch.var(ret_tensors["stress"], dim=0, unbiased=False)
+                        .cpu()
+                        .numpy()
+                        * self.energy_units_to_eV
+                        / self.length_units_to_A**3
+                    )
+
+        if self.model_type in ["so3lr"]:
+            self.results["dipole"] = (
+                torch.mean(ret_tensors["dipole"], dim=0).cpu().numpy()
+            )
+            self.results["partial_charges"] = (
+                torch.mean(ret_tensors["partial_charges"], dim=0).cpu().numpy()
+            )
+            self.results["hirshfeld_ratios"] = (
+                torch.mean(ret_tensors["hirshfeld_ratios"], dim=0)
+                .cpu()
+                .numpy()
+            )
+
+            if multi_output:
+                self.results["dipole_var"] = (
+                    torch.var(ret_tensors["dipole"], dim=0, unbiased=False)
+                    .cpu()
+                    .numpy()
+                )
+                self.results["partial_charges_var"] = (
+                    torch.var(
+                        ret_tensors["partial_charges"], dim=0, unbiased=False
+                    )
+                    .cpu()
+                    .numpy()
+                )
+                self.results["hirshfeld_ratios_var"] = (
+                    torch.var(
+                        ret_tensors["hirshfeld_ratios"], dim=0, unbiased=False
+                    )
+                    .cpu()
+                    .numpy()
+                )
 
 
 class SO3LRCalculator(TorchkratesCalculator):
@@ -461,3 +472,125 @@ class SO3LRCalculator(TorchkratesCalculator):
                 model_path, map_location=device, weights_only=False
             )
         return model
+
+class MultiHeadSO3LRCalculator(TorchkratesCalculator):
+    """Calculator for Multi-Head SO3LR models"""
+
+    def __init__(
+        self,
+        model_path: Union[str, None] = None,
+        model: Union[torch.nn.Module, None] = None,
+        r_max_lr: Optional[float] = None,
+        dispersion_energy_cutoff_lr_damping: Optional[float] = None,
+        compute_stress: bool = False,
+        device: str = "cpu",
+        energy_units_to_eV: float = 1.0,
+        length_units_to_A: float = 1.0,
+        default_dtype="",
+        charges_key="Qs",
+        key_specification=None,
+        **kwargs,
+    ):
+        super().__init__(
+            model_paths=model_path,
+            models=model,
+            r_max_lr=r_max_lr,
+            dispersion_energy_cutoff_lr_damping=dispersion_energy_cutoff_lr_damping,
+            compute_stress=compute_stress,
+            device=device,
+            energy_units_to_eV=energy_units_to_eV,
+            length_units_to_A=length_units_to_A,
+            default_dtype=default_dtype,
+            charges_key=charges_key,
+            key_specification=key_specification,
+            model_type="so3lr",
+            **kwargs,
+        )
+        self.num_heads = self.models[0].num_heads
+        self.models[0].select_heads = False
+        
+        assert self.num_models == 1, "MultiHeadSO3LRCalculator expects a single multi-head model."
+    
+    def calculate(
+        self, atoms=None, properties=None, system_changes=all_changes
+    ):
+        """
+        Calculate properties.
+        :param atoms: ase.Atoms object
+        :param properties: [str], properties to be computed, used by ASE internally
+        :param system_changes: [str], system changes since last calculation, used by ASE internally
+        :return:
+        """
+        # call to base-class to set atoms attribute
+        Calculator.calculate(self, atoms)
+
+        batch_base = self._atoms_to_batch(atoms)
+        ret_tensors = self._create_result_tensors(
+            self.model_type, self.num_heads, len(atoms)
+        )
+        model = self.models[0]
+        batch = self._clone_batch(batch_base)
+        out = model(
+            batch.to_dict(),
+            compute_stress=self.compute_stress,
+        )
+        if self.model_type in ["so3lr", "so3krates"]:
+            ret_tensors["energies"] = out["energy"].detach()
+            ret_tensors["forces"] = out["forces"].detach()
+            if out["stress"] is not None:
+                ret_tensors["stress"] = out["stress"].detach()
+
+        if self.model_type in ["so3lr"]:
+            if out["dipole"] is not None:
+                ret_tensors["dipole"] = out["dipole"].detach()
+            if out["partial_charges"] is not None:
+                ret_tensors["partial_charges"] = out[
+                    "partial_charges"
+                ].detach()
+            if out["hirshfeld_ratios"] is not None:
+                ret_tensors["hirshfeld_ratios"] = out[
+                    "hirshfeld_ratios"
+            ].detach()
+
+        self._process_results(ret_tensors, out, multi_output=True)
+
+    def _create_result_tensors(
+        self, model_type: str, num_heads: int, num_atoms: int
+    ) -> dict:
+        dict_of_tensors = {}
+        if model_type in ["so3lr", "so3krates"]:
+            energies = torch.zeros(num_heads, device=self.device)
+            node_energy = torch.zeros(
+                num_heads, num_atoms, device=self.device
+            )
+            forces = torch.zeros(num_heads, num_atoms, 3, device=self.device)
+            stress = torch.zeros(num_heads, 3, 3, device=self.device)
+            dict_of_tensors.update(
+                {
+                    "energies": energies,
+                    "node_energy": node_energy,
+                    "forces": forces,
+                    "stress": stress,
+                }
+            )
+        if model_type in ["so3lr"]:
+            dipole = torch.zeros(3, device=self.device)
+            partial_charges = torch.zeros(
+                num_atoms, device=self.device
+            )
+            hirshfeld_ratios = torch.zeros(
+                num_atoms, device=self.device
+            )
+            dict_of_tensors.update(
+                {
+                    "dipole": dipole,
+                    "partial_charges": partial_charges,
+                    "hirshfeld_ratios": hirshfeld_ratios,
+                }
+            )
+        return dict_of_tensors
+    
+    def get_hessian(
+        self, atoms=None
+    ):
+        raise NotImplementedError("Hessian calculation is not implemented for Multi-Head SO3LR models.")

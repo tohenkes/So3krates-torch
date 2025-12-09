@@ -548,3 +548,9 @@ class HirshfeldOutputHead(nn.Module):
         hirshfeld_ratios = torch.abs(v_eff)
 
         return hirshfeld_ratios
+
+
+class DirectForceOutputHead(nn.Module):
+    def __init__(self, num_features: int):
+        raise NotImplementedError("DirectForceOutputHead is not implemented yet.")
+
