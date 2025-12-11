@@ -1017,6 +1017,12 @@ def run_training(config: dict) -> None:
             )
             avg_num_neighbors = model.avg_num_neighbors
         atomic_energy_shifts = model.atomic_energy_output_block.energy_shifts
+        if config["TRAINING"].get("force_use_average_shifts", False):
+            atomic_energy_shifts = average_atomic_energy_shifts
+            logging.info(
+                "Forcing use of average atomic energy shifts "
+                "computed from training data for training."
+            )
     else:
         model.avg_num_neighbors = avg_num_neighbors
         atomic_shifts_config = config['ARCHITECTURE'].get('atomic_energy_shifts', None)

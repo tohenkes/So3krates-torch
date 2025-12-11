@@ -114,12 +114,14 @@ class AtomicEnergyOutputHead(nn.Module):
                 )
             )
         elif isinstance(atomic_type_shifts, torch.Tensor) or isinstance(atomic_type_shifts, nn.Parameter):
+            
+            atomic_type_shifts.to(self.device)
+            atomic_type_shifts.requires_grad = False
+            
             self.energy_shifts = nn.Parameter(
                 atomic_type_shifts.to(
                     dtype=torch.get_default_dtype()
-                ),
-                requires_grad=False,
-                device=self.device,
+                )
             )
         else:
             raise ValueError(
