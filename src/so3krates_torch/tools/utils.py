@@ -507,6 +507,28 @@ def save_results_hdf5(results, filename, is_ensemble: bool = False):
                 dset = f.create_dataset(k, data=np.array([]))
                 dset.attrs["is_none"] = True
 
+# TODO: Add support for multi-head outputs
+# TODO: Add support from more output types
+def save_results_xyz(input_data, results, filename):
+    """Save results to an XYZ file."""
+    from ase.io import read, write
+    scalar_keys = ["energies",]
+    tensor_keys = ["forces", ]
+    input_configs = read(input_data, index=":")
+    output_configs = []
+    for i, config in enumerate(input_configs):
+        atoms = config.copy()
+        for key, value in results.items():
+            if key in scalar_keys:
+                if key == "energies":
+                    atoms.info[f"REF_energy"] = value[i].item()
+                else:
+                    atoms.info[f"REF_{key}"] = value[i].item()
+            elif key in tensor_keys:
+                atoms.arrays[f"REF_{key}"] = value[i]
+        output_configs.append(atoms)
+    write(filename, output_configs)
+
 
 def ensemble_from_folder(path_to_models: str, device: str, dtype: str) -> dict:
     """

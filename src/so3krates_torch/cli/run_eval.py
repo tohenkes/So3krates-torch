@@ -5,7 +5,7 @@ from ase.io import read
 import torch
 from mace import data as mace_data
 from pathlib import Path
-
+import os
 
 def run_evaluation(
     model_path: str,
@@ -240,6 +240,11 @@ def main():
         dtype=dtype,
         return_att=return_att,
     )
-
-    save_results_hdf5(result, output_file, is_ensemble=is_ensemble)
-
+    extension = os.path.splitext(output_file)[1].lower()
+    if extension == ".h5" or extension == ".hdf5" or extension == "":
+        save_results_hdf5(result, output_file, is_ensemble=is_ensemble)
+    elif is_ensemble==False and extension == ".xyz":
+        from so3krates_torch.tools.utils import save_results_xyz
+        save_results_xyz(data_path, result, output_file)
+    else:
+        raise ValueError(f"Unsupported output file format: {extension} or ensemble results cannot be saved in .xyz")
