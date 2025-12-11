@@ -878,6 +878,11 @@ def setup_finetuning(
                     "freeze_partial_charges", True
                 ),
             )
+        else:
+            # unfreeze all parameters
+            for param in model.parameters():
+                param.requires_grad = True
+                
         use_eletrostatics = model.electrostatic_energy_bool
         use_dispersion = model.dispersion_energy_bool
         
@@ -1003,17 +1008,16 @@ def run_training(config: dict) -> None:
 
 
     if warm_start:
-        fine_tune_choice = config["TRAINING"].get("finetune_choice", None)
-        if fine_tune_choice == "naive":
-            model.avg_num_neighbors = avg_num_neighbors
+        if config["TRAINING"].get("ft_update_avg_num_neighbors", False):
             logging.info(
-                "Warm starting with naive finetuning, updating "
-                "avg_num_neighbors"
+                "Updating average number of neighbors from training data "
+                "for fine-tuning."
             )
+            model.avg_num_neighbors = avg_num_neighbors
         else:
             logging.info(
-                "Warm starting with non-naive finetuning, "
-                "keeping original avg_num_neighbors"
+                "Retaining average number of neighbors from pretrained model "
+                "for fine-tuning."
             )
             avg_num_neighbors = model.avg_num_neighbors
         atomic_energy_shifts = model.atomic_energy_output_block.energy_shifts
@@ -1079,7 +1083,7 @@ def run_training(config: dict) -> None:
     if start_epoch > 0:
         logging.info(f"Resuming training from epoch {start_epoch}")
     else:
-        logging.info("Starting training from scratch")
+        logging.info("Starting fresh training.")
 
     # Setup training parameters
     max_num_epochs = config["TRAINING"]["num_epochs"]
