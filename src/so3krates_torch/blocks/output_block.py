@@ -169,8 +169,8 @@ class AtomicEnergyOutputHead(nn.Module):
             
         one_hot = data["node_attrs"]
         atomic_number_idx = torch.argmax(one_hot, dim=1)
-        atomic_energies += self.energy_shifts[atomic_number_idx].unsqueeze(1)
         atomic_energies *= self.energy_scales(data["node_attrs"])
+        atomic_energies += self.energy_shifts[atomic_number_idx].unsqueeze(1)
 
 
         return atomic_energies

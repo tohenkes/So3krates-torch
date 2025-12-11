@@ -806,6 +806,11 @@ def setup_finetuning(
     num_elements: int,
     device_name: str,
 ) -> None:
+    
+    # unfreeze all parameters
+    for param in model.parameters():
+        param.requires_grad = True
+        
     # check that a pre-trained model is provided
     choice = config["TRAINING"].get("finetune_choice", None)
     if choice is not None:
@@ -878,10 +883,6 @@ def setup_finetuning(
                     "freeze_partial_charges", True
                 ),
             )
-        else:
-            # unfreeze all parameters
-            for param in model.parameters():
-                param.requires_grad = True
                 
         use_eletrostatics = model.electrostatic_energy_bool
         use_dispersion = model.dispersion_energy_bool
