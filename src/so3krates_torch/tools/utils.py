@@ -12,7 +12,7 @@ from mace.modules.utils import (
     compute_forces_virials,
     compute_hessians_vmap,
 )
-import tools
+import logging
 
 activation_fn_dict = {
     "silu": torch.nn.SiLU,
