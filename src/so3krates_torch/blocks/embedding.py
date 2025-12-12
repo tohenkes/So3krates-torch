@@ -30,8 +30,6 @@ class InvariantEmbedding(torch.nn.Module):
     def forward(self, one_hot: torch.Tensor) -> torch.Tensor:
         return self.embedding(one_hot)
 
-    def reset_parameters(self):
-        self.embedding.reset_parameters()
 
 
 class EuclideanEmbedding(torch.nn.Module):

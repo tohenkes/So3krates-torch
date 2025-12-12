@@ -43,15 +43,6 @@ class AtomicEnergyOutputHead(nn.Module):
         self.use_non_linearity = use_non_linearity
         self.non_linearity = non_linearity()
         self.final_non_linearity = final_non_linearity
-        if energy_learn_atomic_type_shifts:
-            assert (
-                atomic_type_shifts is None
-            ), "If energy_learn_atomic_type_shifts is True, atomic_type_shifts must be None."
-        if energy_learn_atomic_type_shifts or energy_learn_atomic_type_scales:
-            assert num_elements is not None, (
-                "If energy_learn_atomic_type_shifts or energy_learn_atomic_type_scales is True, "
-                "num_elements must be provided."
-            )
 
         self.energy_learn_atomic_type_shifts = energy_learn_atomic_type_shifts
         self.energy_learn_atomic_type_scales = energy_learn_atomic_type_scales

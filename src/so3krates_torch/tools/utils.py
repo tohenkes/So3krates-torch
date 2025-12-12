@@ -12,7 +12,7 @@ from mace.modules.utils import (
     compute_forces_virials,
     compute_hessians_vmap,
 )
-from torch.func import jacrev
+import tools
 
 activation_fn_dict = {
     "silu": torch.nn.SiLU,
@@ -21,6 +21,34 @@ activation_fn_dict = {
     "tanh": torch.nn.Tanh,
     "identity": torch.nn.Identity,
 }
+
+
+def report_count_params(
+    model: torch.nn.Module,
+    num_elements: int,
+    use_eletrostatics: bool,
+    use_dispersion: bool,
+    ) -> int:
+    # log number of trainable params, absolute and percentage
+    trainable_params = 0
+    total_params = 0
+    for name, param in model.named_parameters():
+        if not use_eletrostatics and "partial_charges_output_block" in name:
+            continue
+        if not use_dispersion and "hirshfeld_output_block" in name:
+            continue
+        total_params += param.numel()
+        if param.requires_grad:
+            if "embedding" in name:
+                if param.shape[1] == 118:
+                    trainable_params += param[:, :num_elements].numel()
+            else:
+                trainable_params += param.numel()
+    logging.info(f"Total model parameters: {total_params}")
+    logging.info(f"Trainable model parameters: {trainable_params}")
+    logging.info(
+        f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
+    )
 
 
 def compute_forces_virials(

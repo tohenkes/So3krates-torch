@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from random import choice
 import torch
 from so3krates_torch.blocks.euclidean_transformer import (
     EuclideanAttentionBlockLORA,
@@ -6,9 +7,22 @@ from so3krates_torch.blocks.euclidean_transformer import (
     EuclideanAttentionBlockDoRA,
     EuclideanAttentionBlock,
 )
-from so3krates_torch.modules.models import MultiHeadSO3LR
+from so3krates_torch.tools.multihead_utils import pretrained_to_mh_model
+from so3krates_torch.tools.utils import report_count_params
 import math
+import logging
 
+POSSIBLE_FINETUNING_CHOICES = [
+        "last_layer",
+        "mlp",
+        "qkv",
+        "lora",
+        "dora",
+        "vera",
+        "last_layer+mlp",
+        "qkv+mlp",
+        "lora+mlp",
+]
 
 @contextmanager
 def preserve_grad_state(model):
@@ -190,20 +204,10 @@ def freeze_model_parameters(
     freeze_embedding: bool = True,
     freeze_lora_A: bool = False,
 ):
-    possible_choices = [
-        "last_layer",
-        "mlp",
-        "qkv",
-        "lora",
-        "dora",
-        "vera",
-        "last_layer+mlp",
-        "qkv+mlp",
-        "lora+mlp",
-    ]
-    if keep_trainable_choice not in possible_choices:
+
+    if keep_trainable_choice not in POSSIBLE_FINETUNING_CHOICES:
         raise ValueError(
-            f"Invalid choice '{keep_trainable_choice}'. Must be one of {possible_choices}."
+            f"Invalid choice '{keep_trainable_choice}'. Must be one of {POSSIBLE_FINETUNING_CHOICES}."
         )
 
     keep_trainable = []
@@ -325,17 +329,103 @@ def freeze_model_parameters(
                 break  # Found match, no need to check other keys
 
 
-def model_to_multihead(
-    model,
-    num_output_heads: int,
-    settings: dict,
-    device: str = "cpu",
-):
-    mh_model = MultiHeadSO3LR(num_output_heads=num_output_heads, **settings)
-    mh_model.load_state_dict(
-        model.state_dict(),
-        strict=False,  # Allow missing keys for new output heads
+def setup_finetuning(
+    model: torch.nn.Module,
+    finetune_choice: str,
+    device_name: str,
+    num_elements: int = None,
+    freeze_embedding: bool = True,
+    freeze_zbl: bool = True,
+    freeze_hirshfeld: bool = True,
+    freeze_partial_charges: bool = True,
+    freeze_shifts: bool = False,
+    freeze_scales: bool = False,
+    lora_rank: int = 4,
+    lora_alpha: float = None,
+    lora_freeze_A: bool = False,
+    dora_scaling_to_one: bool = True,
+    convert_to_multihead: bool = False,
+    architecture_settings: dict = None,
+    seed: int = 42,
+    log: bool = False,
+) -> None:
+    #TODO: docstring etc
+    assert finetune_choice in POSSIBLE_FINETUNING_CHOICES, (
+        f"Invalid finetuning choice '{finetune_choice}'. Must be one of {POSSIBLE_FINETUNING_CHOICES}."
     )
-    model = mh_model.to(device)
+    
+    # unfreeze all parameters in case loaded model has frozen params
+    for param in model.parameters():
+        param.requires_grad = True
+        
+    if log:
+        logging.info(f"Setting up finetuning with choice: {finetune_choice}")
+    
+    if convert_to_multihead:
+        assert architecture_settings is not None, (
+            "architecture_settings must be provided when convert_to_multihead is True"
+        )
+        model = pretrained_to_mh_model(architecture_settings, model, device_name)
+        
+    if finetune_choice == "lora" or finetune_choice == "lora+mlp":
+        lora_alpha = 2.0 * lora_rank if lora_alpha is None else lora_alpha
+        model = model_to_lora(
+            model,
+            rank=lora_rank,
+            alpha=lora_alpha,
+            freeze_A=lora_freeze_A,
+            device=device_name,
+            seed=seed,
+        )
+        if log:
+            logging.info("Converted model to LoRA format")
 
+    elif finetune_choice == "dora":
+        model = model_to_lora(
+            model,
+            rank=lora_rank,
+            alpha=lora_alpha,
+            use_dora=True,
+            device=device_name,
+            scaling_to_one=dora_scaling_to_one
+        )
+        logging.info("Converted model to DoRA format")
+
+    elif finetune_choice == "vera":
+        model = model_to_lora(
+            model,
+            rank=lora_rank,
+            alpha=lora_alpha,
+            use_vera=True,
+            device=device_name,
+            scaling_to_one=dora_scaling_to_one
+        )
+        if log:
+            logging.info("Converted model to VeRA format")
+
+    if finetune_choice != "naive":
+        freeze_model_parameters(
+            model,
+            finetune_choice,
+            freeze_shifts=freeze_shifts,
+            freeze_scales=freeze_scales,
+            freeze_lora_A=lora_freeze_A,
+            freeze_embedding=freeze_embedding,
+            freeze_zbl=freeze_zbl,
+            freeze_hirshfeld=freeze_hirshfeld,
+            freeze_partial_charges=freeze_partial_charges,
+        )
+            
+    if log:
+        assert num_elements is not None, (
+            "num_elements must be provided for parameter reporting"
+        )
+        use_electrostatics = model.electrostatic_energy_bool
+        use_dispersion = model.dispersion_energy_bool
+        report_count_params(
+            model, 
+            num_elements,
+            use_electrostatics, 
+            use_dispersion
+        )
     return model

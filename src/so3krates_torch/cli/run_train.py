@@ -27,10 +27,8 @@ from mace.tools.checkpoint import CheckpointHandler, CheckpointState
 from torch_ema import ExponentialMovingAverage
 from so3krates_torch.tools.train import train
 from so3krates_torch.tools.finetune import (
-    freeze_model_parameters,
-    model_to_lora,
     fuse_lora_weights,
-    model_to_multihead,
+    setup_finetuning
 )
 import os
 
@@ -348,6 +346,7 @@ def set_avg_num_neighbors_in_model(
         layer.euclidean_attention_block.att_norm_inv = avg_num_neighbors
         layer.euclidean_attention_block.att_norm_ev = avg_num_neighbors
 
+
 def set_atomic_energy_shifts_in_model(
     model: Union[SO3LR, MultiHeadSO3LR],
     atomic_energy_shifts: Union[dict, torch.tensor, nn.Parameter]
@@ -355,7 +354,6 @@ def set_atomic_energy_shifts_in_model(
     model.atomic_energy_output_block.set_defined_energy_shifts(
         atomic_energy_shifts
     )
-
         
         
 def process_config_atomic_energies(
@@ -370,7 +368,8 @@ def process_config_atomic_energies(
         else:
             atomic_energy_shifts[z] = 0.0
     return atomic_energy_shifts
-    
+
+   
 def determine_num_elements(data_loader: torch.utils.data.DataLoader) -> int:
     """Determine the number of unique elements in the dataset."""
     unique_elements = set()
@@ -765,135 +764,47 @@ def load_checkpoint_if_exists(
         return 0
 
 
-def pretrained_to_mh_model(
-    config: dict,
-    model: torch.nn.Module,
-    device_name: str,
-) -> None:
-    logging.info("Converting pretrained model to multi-head format. WARNING: Using provided settings for conversion.")
-    num_output_heads = config["ARCHITECTURE"].get("num_output_heads", None)
-    assert (
-        num_output_heads is not None
-    ), "num_output_heads must be specified for multi-head model"
-
-    assert (
-        config.get("ARCHITECTURE") is not None
-    ), "ARCHITECTURE settings must be provided in config"
-
-    exclude = [
-        "convert_to_multihead",
-        "use_multihead",
-        "num_output_heads",
-        "r_max_lr",
-    ]
-    settings = {
-        k: v for k, v in config["ARCHITECTURE"].items() if k not in exclude
-    }
-    settings["dtype"] = config["GENERAL"].get("default_dtype", "float32")
-    settings["device"] = device_name
-    model = model_to_multihead(
-        model=model,
-        settings=settings,
-        num_output_heads=num_output_heads,
-        device=device_name,
-    )
-    return model
-
-
-def setup_finetuning(
+def handle_finetuning(
     config: dict,
     model: torch.nn.Module,
     num_elements: int,
     device_name: str,
 ) -> None:
     
-    # unfreeze all parameters
-    for param in model.parameters():
-        param.requires_grad = True
-        
-    # check that a pre-trained model is provided
-    choice = config["TRAINING"].get("finetune_choice", None)
-    if choice is not None:
-        pretrained_model_given = (
-            config["TRAINING"].get("pretrained_weights") is not None
-            or config["TRAINING"].get("pretrained_model") is not None
-        )
-        assert pretrained_model_given, (
-            "Finetuning requires a pretrained model. "
-            "Please provide 'pretrained_weights' or 'pretrained_model' in the config."
-        )
-
-        logging.info(f"Setting up finetuning with choice: {choice}")
-        if config["ARCHITECTURE"].get("convert_to_multihead", False):
-            model = pretrained_to_mh_model(config, model, device_name)
-
-        lora_rank = config["TRAINING"].get("lora_rank", 4)
-        lora_alpha = config["TRAINING"].get("lora_alpha", 2.0 * lora_rank)
-
-        if choice == "lora" or choice == "lora+mlp":
-            model = model_to_lora(
-                model,
-                rank=lora_rank,
-                alpha=lora_alpha,
-                freeze_A=config["TRAINING"].get("lora_freeze_A", False),
-                device=device_name,
-                seed=config["GENERAL"].get("seed", 42),
-            )
-            logging.info("Converted model to LoRA format")
-
-        elif choice == "dora":
-            model = model_to_lora(
-                model,
-                rank=lora_rank,
-                alpha=lora_alpha,
-                use_dora=True,
-                device=device_name,
-                scaling_to_one=config["TRAINING"].get(
-                    "dora_scaling_to_one", True
-                ),
-            )
-            logging.info("Converted model to DoRA format")
-
-        elif choice == "vera":
-            model = model_to_lora(
-                model,
-                rank=lora_rank,
-                alpha=lora_alpha,
-                use_vera=True,
-                device=device_name,
-                scaling_to_one=config["TRAINING"].get(
-                    "vera_scaling_to_one", True
-                ),
-            )
-            logging.info("Converted model to VeRA format")
-
-        if choice != "naive":
-            freeze_model_parameters(
-                model,
-                choice,
-                freeze_lora_A=config["TRAINING"].get("lora_freeze_A", False),
-                freeze_embedding=config["TRAINING"].get(
-                    "freeze_embedding", True
-                ),
-                freeze_zbl=config["TRAINING"].get("freeze_zbl", True),
-                freeze_hirshfeld=config["TRAINING"].get(
-                    "freeze_hirshfeld", True
-                ),
-                freeze_partial_charges=config["TRAINING"].get(
-                    "freeze_partial_charges", True
-                ),
-            )
-                
-        use_eletrostatics = model.electrostatic_energy_bool
-        use_dispersion = model.dispersion_energy_bool
-        
-        report_count_params(
-            model, 
-            num_elements,
-            use_eletrostatics, 
-            use_dispersion
-        )
-    return model
+    
+    return setup_finetuning(
+        model=model,
+        finetune_choice=config["TRAINING"].get("finetune_choice", None),
+        device_name=device_name,
+        num_elements=num_elements,
+        freeze_embedding=config["TRAINING"].get(
+            "freeze_embedding", True
+        ),
+        freeze_zbl=config["TRAINING"].get("freeze_zbl", True),
+        freeze_hirshfeld=config["TRAINING"].get(
+            "freeze_hirshfeld", True
+        ),
+        freeze_partial_charges=config["TRAINING"].get(
+            "freeze_partial_charges", True
+        ),
+        freeze_shifts=config["TRAINING"].get(
+            "freeze_shifts", False
+        ),
+        freeze_scales=config["TRAINING"].get(
+            "freeze_scales", False
+        ),
+        lora_rank=config["TRAINING"].get("lora_rank", 4),
+        lora_alpha=config["TRAINING"].get("lora_alpha", 8.0),
+        lora_freeze_A=config["TRAINING"].get("lora_freeze_A", False),
+        dora_scaling_to_one=config["TRAINING"].get(
+            "dora_scaling_to_one", True
+        ),
+        convert_to_multihead=config["ARCHITECTURE"].get(
+            "convert_to_multihead", False
+        ),
+        seed=config["GENERAL"].get("seed", 42),
+        log=True
+    )
 
 
 def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
@@ -904,34 +815,6 @@ def set_dtype_model(model: torch.nn.Module, dtype_str: str) -> None:
     # set all model params to dtype
     for param in model.parameters():
         param.data = param.data.to(dtype)
-
-
-def report_count_params(
-    model: torch.nn.Module,
-    num_elements: int,
-    use_eletrostatics: bool,
-    use_dispersion: bool,
-    ) -> int:
-    # log number of trainable params, absolute and percentage
-    trainable_params = 0
-    total_params = 0
-    for name, param in model.named_parameters():
-        if not use_eletrostatics and "partial_charges_output_block" in name:
-            continue
-        if not use_dispersion and "hirshfeld_output_block" in name:
-            continue
-        total_params += param.numel()
-        if param.requires_grad:
-            if "embedding" in name:
-                if param.shape[1] == 118:
-                    trainable_params += param[:, :num_elements].numel()
-            else:
-                trainable_params += param.numel()
-    logging.info(f"Total model parameters: {total_params}")
-    logging.info(f"Trainable model parameters: {trainable_params}")
-    logging.info(
-        f"Percentage of trainable parameters: {100 * trainable_params / total_params:.2f}%"
-    )
 
 
 def run_training(config: dict) -> None:

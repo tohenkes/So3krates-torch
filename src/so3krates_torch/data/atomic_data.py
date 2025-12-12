@@ -1,6 +1,6 @@
 ###########################################################################################
 
-# Taken from MACE package: https://github.com/ACEsuit/mace
+# Taken from MACE package: https://github.com/ACEsuit/mace and modified for So3krates/SO3LR
 
 # Atomic Data Class for handling molecules as graphs
 # Authors: Ilyes Batatia, Gregor Simm

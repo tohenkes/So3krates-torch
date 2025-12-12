@@ -473,6 +473,7 @@ class SO3LRCalculator(TorchkratesCalculator):
             )
         return model
 
+
 class MultiHeadSO3LRCalculator(TorchkratesCalculator):
     """Calculator for Multi-Head SO3LR models"""
 
