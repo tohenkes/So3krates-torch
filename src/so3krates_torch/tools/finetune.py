@@ -340,6 +340,7 @@ def setup_finetuning(
     freeze_partial_charges: bool = True,
     freeze_shifts: bool = False,
     freeze_scales: bool = False,
+    convert_to_lora: bool = True,
     lora_rank: int = 4,
     lora_alpha: float = None,
     lora_freeze_A: bool = False,
@@ -348,7 +349,7 @@ def setup_finetuning(
     architecture_settings: dict = None,
     seed: int = 42,
     log: bool = False,
-) -> None:
+) -> torch.nn.Module:
     #TODO: docstring etc
     assert finetune_choice in POSSIBLE_FINETUNING_CHOICES, (
         f"Invalid finetuning choice '{finetune_choice}'. Must be one of {POSSIBLE_FINETUNING_CHOICES}."
@@ -367,7 +368,9 @@ def setup_finetuning(
         )
         model = pretrained_to_mh_model(architecture_settings, model, device_name)
         
-    if finetune_choice == "lora" or finetune_choice == "lora+mlp":
+    if (
+        finetune_choice == "lora" or finetune_choice == "lora+mlp" and convert_to_lora
+    ):
         lora_alpha = 2.0 * lora_rank if lora_alpha is None else lora_alpha
         model = model_to_lora(
             model,
