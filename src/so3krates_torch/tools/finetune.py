@@ -13,6 +13,7 @@ import math
 import logging
 
 POSSIBLE_FINETUNING_CHOICES = [
+        "naive",
         "last_layer",
         "mlp",
         "qkv",
