@@ -932,6 +932,9 @@ def get_model_settings_torch_to_flax(
     cfg.model.energy_activation_fn = torch_settings.get(
         "energy_activation_fn", "silu"
     )
+    cfg.neighborlist_format_lr = torch_settings.get(
+        "neighborlist_format_lr", "sparse"
+    )
 
     # Data settings
     cfg.data = config_dict.ConfigDict()
