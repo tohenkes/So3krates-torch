@@ -28,7 +28,7 @@ def report_count_params(
     num_elements: int,
     use_eletrostatics: bool,
     use_dispersion: bool,
-    ) -> int:
+) -> int:
     # log number of trainable params, absolute and percentage
     trainable_params = 0
     total_params = 0
@@ -91,7 +91,7 @@ def compute_multihead_forces_stress(
     cell: torch.Tensor,
     training=True,
     compute_stress: bool = False,
-    ):
+):
     num_graphs, num_heads = energy.shape
     # change shape to [num_heads,num_graphs]
     energy_for_grad = energy.view(num_graphs, num_heads).permute(1, 0)
@@ -126,18 +126,14 @@ def compute_multihead_forces_stress(
     if compute_stress and virials is not None:
         cell = cell.view(-1, 3, 3)
         volume = torch.linalg.det(cell).abs().unsqueeze(-1)
-        stress = virials / volume.view(1,-1, 1, 1)
+        stress = virials / volume.view(1, -1, 1, 1)
         stress = torch.where(
             torch.abs(stress) < 1e10, stress, torch.zeros_like(stress)
-        )
+        ).squeeze()
     return -1 * forces, -1 * virials, stress
 
-def compute_multihead_forces(
-    energy,
-    positions,
-    batch, 
-    training=True
-    ):
+
+def compute_multihead_forces(energy, positions, batch, training=True):
     num_graphs, num_heads = energy.shape
     # change shape to [num_heads,num_graphs]
     energy_for_grad = energy.view(num_graphs, num_heads).permute(1, 0)
@@ -199,9 +195,7 @@ def get_outputs(
                 displacement=displacement,
                 cell=cell,
                 compute_stress=compute_stress,
-                training=(
-                    training or compute_hessian or compute_edge_forces
-                ),
+                training=(training or compute_hessian or compute_edge_forces),
             )
         else:
             forces, virials, stress = compute_forces_virials(
@@ -212,7 +206,7 @@ def get_outputs(
                 compute_stress=compute_stress,
                 training=(training or compute_hessian or compute_edge_forces),
             )
-            
+
     elif compute_force:
         if is_multihead:
             forces, virials, stress = (
@@ -293,9 +287,9 @@ def load_results_hdf5(filename, is_ensemble: bool = False):
                                     key_grp = item_grp[key_type]
                                     att_dict[key_type] = {}
                                     for layer_idx in key_grp.keys():
-                                        att_dict[key_type][int(layer_idx)] = (
-                                            key_grp[layer_idx][()]
-                                        )
+                                        att_dict[key_type][
+                                            int(layer_idx)
+                                        ] = key_grp[layer_idx][()]
 
                             # Load 'senders' and 'receivers' tensors
                             for key_type in ["senders", "receivers"]:
@@ -329,9 +323,9 @@ def load_results_hdf5(filename, is_ensemble: bool = False):
                                 key_grp = item_grp[key_type]
                                 att_dict[key_type] = {}
                                 for layer_idx in key_grp.keys():
-                                    att_dict[key_type][int(layer_idx)] = (
-                                        key_grp[layer_idx][()]
-                                    )
+                                    att_dict[key_type][
+                                        int(layer_idx)
+                                    ] = key_grp[layer_idx][()]
 
                         # Load 'senders' and 'receivers' tensors
                         for key_type in ["senders", "receivers"]:
@@ -535,13 +529,19 @@ def save_results_hdf5(results, filename, is_ensemble: bool = False):
                 dset = f.create_dataset(k, data=np.array([]))
                 dset.attrs["is_none"] = True
 
+
 # TODO: Add support for multi-head outputs
 # TODO: Add support from more output types
 def save_results_xyz(input_data, results, filename):
     """Save results to an XYZ file."""
     from ase.io import read, write
-    scalar_keys = ["energies",]
-    tensor_keys = ["forces", ]
+
+    scalar_keys = [
+        "energies",
+    ]
+    tensor_keys = [
+        "forces",
+    ]
     input_configs = read(input_data, index=":")
     output_configs = []
     for i, config in enumerate(input_configs):
@@ -585,6 +585,7 @@ def ensemble_from_folder(path_to_models: str, device: str, dtype: str) -> dict:
             ensemble[filename_without_suffix] = model
     return ensemble
 
+
 def create_configs_from_list(
     atoms_list: list,
     key_specification: mace_data.utils.KeySpecification = mace_data.utils.KeySpecification(),
@@ -592,13 +593,12 @@ def create_configs_from_list(
 ):
     configs = [
         mace_data.config_from_atoms(
-            atoms, 
-            key_specification=key_specification,
-            head_name=head_name
-            )
+            atoms, key_specification=key_specification, head_name=head_name
+        )
         for atoms in atoms_list
     ]
     return configs
+
 
 def create_data_from_configs(
     config_list: list,
@@ -607,7 +607,6 @@ def create_data_from_configs(
     all_heads: list = None,
     z_table: utils.AtomicNumberTable = None,
 ):
-
     if z_table is None:
         z_table = utils.AtomicNumberTable([int(z) for z in range(1, 119)])
     return [
@@ -619,7 +618,8 @@ def create_data_from_configs(
             heads=all_heads,
         )
         for config in config_list
-    ]   
+    ]
+
 
 def create_data_from_list(
     atoms_list: list,
@@ -630,7 +630,6 @@ def create_data_from_list(
     key_specification: mace_data.utils.KeySpecification = mace_data.utils.KeySpecification(),
     z_table: utils.AtomicNumberTable = None,
 ):
-
     configs = create_configs_from_list(
         atoms_list,
         key_specification=key_specification,
