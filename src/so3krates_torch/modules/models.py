@@ -837,11 +837,18 @@ class MultiHeadSO3LR(SO3LR):
             atomic_energies += dispersion_energies.unsqueeze(-1)
         return atomic_energies
 
-    def _select_heads(self, output_dict: dict) -> dict:
+    def _select_heads(
+        self,
+        output_dict: dict,
+        ) -> dict:
         
-        output_dict["energy"] = torch.diagonal(
-            output_dict["energy"][self.head_idxs]
+        row_indices = torch.arange(
+            output_dict["energy"].shape[1],
+            device=self.device,
         )
+        output_dict["energy"] = output_dict["energy"][
+            self.head_idxs, row_indices
+        ]
         graph_splits = self.data_ptr
         sizes = (graph_splits[1:] - graph_splits[:-1]).long()
         full_node_index = torch.arange(graph_splits[-1], device=self.device)
@@ -852,7 +859,16 @@ class MultiHeadSO3LR(SO3LR):
         output_dict["forces"] = output_dict["forces"][
             head_index_repeated, full_node_index
         ]
-
+        
+        if output_dict["stress"] is not None:
+            output_dict["stress"] = output_dict["stress"][
+                self.head_idxs, row_indices
+            ]
+        if output_dict["virials"] is not None:
+            output_dict["virials"] = output_dict["virials"][
+                self.head_idxs, row_indices
+            ]
+        
         return output_dict
 
     def _create_output_dict(
