@@ -334,12 +334,12 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
 
         one_hot = data["node_attrs"]
         atomic_number_idx = torch.argmax(one_hot, dim=1)
-        atomic_energies += self.energy_shifts[atomic_number_idx].view(-1, 1, 1)
 
 
         one_hot = data["node_attrs"]
         scales = torch.matmul(one_hot, self.energy_scales)
         atomic_energies *= scales.view(-1, 1, 1)
+        atomic_energies += self.energy_shifts[atomic_number_idx].view(-1, 1, 1)
 
         return atomic_energies.squeeze(
             0
