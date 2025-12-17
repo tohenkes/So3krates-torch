@@ -802,6 +802,7 @@ def handle_finetuning(
         convert_to_multihead=config["ARCHITECTURE"].get(
             "convert_to_multihead", False
         ),
+        architecture_settings=config["ARCHITECTURE"],
         seed=config["GENERAL"].get("seed", 42),
         log=True
     )
