@@ -931,7 +931,8 @@ def run_training(config: dict) -> None:
             )
          
     # Setup finetuning if specified
-    model = handle_finetuning(config, model, num_elements, device_name)
+    if config["TRAINING"].get("finetune_choice", None):
+        model = handle_finetuning(config, model, num_elements, device_name)
        
     logging.info(f"Atomic energy shifts: {atomic_energy_shifts}")
     set_atomic_energy_shifts_in_model(
