@@ -41,6 +41,15 @@ def run_evaluation(
     This function mirrors the original inline logic but uses explicit
     function arguments instead of relying on an argparse Namespace.
     """
+
+    # set default dtype
+    if dtype == "float32":
+        torch.set_default_dtype(torch.float32)
+    elif dtype == "float64":
+        torch.set_default_dtype(torch.float64)
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
     # check if path ends with .model or is dir
     if model_path.endswith(".model"):
         model_paths = [model_path]
@@ -49,7 +58,9 @@ def run_evaluation(
 
     models = []
     for mp in model_paths:
-        model = torch.load(mp, map_location=device, weights_only=False)
+        model = torch.load(mp, map_location=device, weights_only=False).to(
+            torch.float32 if dtype == "float32" else torch.float64
+        )
         model.return_mean = False
         models.append(model)
 
