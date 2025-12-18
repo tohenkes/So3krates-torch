@@ -10,6 +10,7 @@ from so3krates_torch.modules.models import So3krates, SO3LR
 import yaml
 import torch.nn as nn
 
+
 def flatten_params(params, prefix=""):
     flat_params = {}
 
@@ -58,16 +59,16 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
     mapping = {}
 
     # Embedding layers
-    mapping["params/feature_embeddings_0/Embed_0/embedding"] = (
-        "inv_feature_embedding.embedding.weight"
-    )
+    mapping[
+        "params/feature_embeddings_0/Embed_0/embedding"
+    ] = "inv_feature_embedding.embedding.weight"
     if trainable_rbf:
-        mapping["params/geometry_embeddings_0/rbf_fn/centers"] = (
-            "radial_embedding.radial_basis_fn.centers"
-        )
-        mapping["params/geometry_embeddings_0/rbf_fn/widths"] = (
-            "radial_embedding.radial_basis_fn.widths"
-        )
+        mapping[
+            "params/geometry_embeddings_0/rbf_fn/centers"
+        ] = "radial_embedding.radial_basis_fn.centers"
+        mapping[
+            "params/geometry_embeddings_0/rbf_fn/widths"
+        ] = "radial_embedding.radial_basis_fn.widths"
     if use_charge_embed and not use_spin_embed:
         mapping[
             "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"
@@ -138,151 +139,151 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
         torch_prefix = f"euclidean_transformers.{i}"
 
         # Radial filters (inv)
-        mapping[f"{flax_prefix}/radial_filter1_layer_1/kernel"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_rbf.0.weight"
-        )
-        mapping[f"{flax_prefix}/radial_filter1_layer_1/bias"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_rbf.0.bias"
-        )
-        mapping[f"{flax_prefix}/radial_filter1_layer_2/kernel"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_rbf.mlp_rbf_layer_1.0.weight"
-        )
-        mapping[f"{flax_prefix}/radial_filter1_layer_2/bias"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_rbf.mlp_rbf_layer_1.0.bias"
-        )
+        mapping[
+            f"{flax_prefix}/radial_filter1_layer_1/kernel"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_rbf.0.weight"
+        mapping[
+            f"{flax_prefix}/radial_filter1_layer_1/bias"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_rbf.0.bias"
+        mapping[
+            f"{flax_prefix}/radial_filter1_layer_2/kernel"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_rbf.mlp_rbf_layer_1.0.weight"
+        mapping[
+            f"{flax_prefix}/radial_filter1_layer_2/bias"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_rbf.mlp_rbf_layer_1.0.bias"
 
         # Radial filters (ev)
-        mapping[f"{flax_prefix}/radial_filter2_layer_1/kernel"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_rbf.0.weight"
-        )
-        mapping[f"{flax_prefix}/radial_filter2_layer_1/bias"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_rbf.0.bias"
-        )
-        mapping[f"{flax_prefix}/radial_filter2_layer_2/kernel"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_rbf.mlp_rbf_layer_1.0.weight"
-        )
-        mapping[f"{flax_prefix}/radial_filter2_layer_2/bias"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_rbf.mlp_rbf_layer_1.0.bias"
-        )
+        mapping[
+            f"{flax_prefix}/radial_filter2_layer_1/kernel"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_rbf.0.weight"
+        mapping[
+            f"{flax_prefix}/radial_filter2_layer_1/bias"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_rbf.0.bias"
+        mapping[
+            f"{flax_prefix}/radial_filter2_layer_2/kernel"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_rbf.mlp_rbf_layer_1.0.weight"
+        mapping[
+            f"{flax_prefix}/radial_filter2_layer_2/bias"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_rbf.mlp_rbf_layer_1.0.bias"
 
         # Spherical filters (inv)
-        mapping[f"{flax_prefix}/spherical_filter1_layer_1/kernel"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_ev.0.weight"
-        )
-        mapping[f"{flax_prefix}/spherical_filter1_layer_1/bias"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_ev.0.bias"
-        )
-        mapping[f"{flax_prefix}/spherical_filter1_layer_2/kernel"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_ev.mlp_ev_layer_1.0.weight"
-        )
-        mapping[f"{flax_prefix}/spherical_filter1_layer_2/bias"] = (
-            f"{torch_prefix}.filter_net_inv.mlp_ev.mlp_ev_layer_1.0.bias"
-        )
+        mapping[
+            f"{flax_prefix}/spherical_filter1_layer_1/kernel"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_ev.0.weight"
+        mapping[
+            f"{flax_prefix}/spherical_filter1_layer_1/bias"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_ev.0.bias"
+        mapping[
+            f"{flax_prefix}/spherical_filter1_layer_2/kernel"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_ev.mlp_ev_layer_1.0.weight"
+        mapping[
+            f"{flax_prefix}/spherical_filter1_layer_2/bias"
+        ] = f"{torch_prefix}.filter_net_inv.mlp_ev.mlp_ev_layer_1.0.bias"
 
         # Spherical filters (ev)
-        mapping[f"{flax_prefix}/spherical_filter2_layer_1/kernel"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_ev.0.weight"
-        )
-        mapping[f"{flax_prefix}/spherical_filter2_layer_1/bias"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_ev.0.bias"
-        )
-        mapping[f"{flax_prefix}/spherical_filter2_layer_2/kernel"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_ev.mlp_ev_layer_1.0.weight"
-        )
-        mapping[f"{flax_prefix}/spherical_filter2_layer_2/bias"] = (
-            f"{torch_prefix}.filter_net_ev.mlp_ev.mlp_ev_layer_1.0.bias"
-        )
+        mapping[
+            f"{flax_prefix}/spherical_filter2_layer_1/kernel"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_ev.0.weight"
+        mapping[
+            f"{flax_prefix}/spherical_filter2_layer_1/bias"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_ev.0.bias"
+        mapping[
+            f"{flax_prefix}/spherical_filter2_layer_2/kernel"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_ev.mlp_ev_layer_1.0.weight"
+        mapping[
+            f"{flax_prefix}/spherical_filter2_layer_2/bias"
+        ] = f"{torch_prefix}.filter_net_ev.mlp_ev.mlp_ev_layer_1.0.bias"
 
         # Attention weights
-        mapping[f"{flax_prefix}/Wq1"] = (
-            f"{torch_prefix}.euclidean_attention_block.W_q_inv"
-        )
-        mapping[f"{flax_prefix}/Wk1"] = (
-            f"{torch_prefix}.euclidean_attention_block.W_k_inv"
-        )
-        mapping[f"{flax_prefix}/Wv1"] = (
-            f"{torch_prefix}.euclidean_attention_block.W_v_inv"
-        )
-        mapping[f"{flax_prefix}/Wq2"] = (
-            f"{torch_prefix}.euclidean_attention_block.W_q_ev"
-        )
-        mapping[f"{flax_prefix}/Wk2"] = (
-            f"{torch_prefix}.euclidean_attention_block.W_k_ev"
-        )
+        mapping[
+            f"{flax_prefix}/Wq1"
+        ] = f"{torch_prefix}.euclidean_attention_block.W_q_inv"
+        mapping[
+            f"{flax_prefix}/Wk1"
+        ] = f"{torch_prefix}.euclidean_attention_block.W_k_inv"
+        mapping[
+            f"{flax_prefix}/Wv1"
+        ] = f"{torch_prefix}.euclidean_attention_block.W_v_inv"
+        mapping[
+            f"{flax_prefix}/Wq2"
+        ] = f"{torch_prefix}.euclidean_attention_block.W_q_ev"
+        mapping[
+            f"{flax_prefix}/Wk2"
+        ] = f"{torch_prefix}.euclidean_attention_block.W_k_ev"
 
         # Exchange block
-        mapping[f"params/layers_{i}/exchange_block/mlp_layer_2/kernel"] = (
-            f"{torch_prefix}.interaction_block.linear_layer.weight"
-        )
-        mapping[f"params/layers_{i}/exchange_block/mlp_layer_2/bias"] = (
-            f"{torch_prefix}.interaction_block.linear_layer.bias"
-        )
+        mapping[
+            f"params/layers_{i}/exchange_block/mlp_layer_2/kernel"
+        ] = f"{torch_prefix}.interaction_block.linear_layer.weight"
+        mapping[
+            f"params/layers_{i}/exchange_block/mlp_layer_2/bias"
+        ] = f"{torch_prefix}.interaction_block.linear_layer.bias"
 
         # Layer normalization
         if layer_norm_1:
-            mapping[f"params/layers_{i}/layer_normalization_1/scale"] = (
-                f"{torch_prefix}.layer_norm_inv_1.weight"
-            )
-            mapping[f"params/layers_{i}/layer_normalization_1/bias"] = (
-                f"{torch_prefix}.layer_norm_inv_1.bias"
-            )
+            mapping[
+                f"params/layers_{i}/layer_normalization_1/scale"
+            ] = f"{torch_prefix}.layer_norm_inv_1.weight"
+            mapping[
+                f"params/layers_{i}/layer_normalization_1/bias"
+            ] = f"{torch_prefix}.layer_norm_inv_1.bias"
         if layer_norm_2:
-            mapping[f"params/layers_{i}/layer_normalization_2/scale"] = (
-                f"{torch_prefix}.layer_norm_inv_2.weight"
-            )
-            mapping[f"params/layers_{i}/layer_normalization_2/bias"] = (
-                f"{torch_prefix}.layer_norm_inv_2.bias"
-            )
+            mapping[
+                f"params/layers_{i}/layer_normalization_2/scale"
+            ] = f"{torch_prefix}.layer_norm_inv_2.weight"
+            mapping[
+                f"params/layers_{i}/layer_normalization_2/bias"
+            ] = f"{torch_prefix}.layer_norm_inv_2.bias"
 
         # Residual MLPs
         if residual_mlp_1:
-            mapping[f"params/layers_{i}/res_mlp_1_layer_1/kernel"] = (
-                f"{torch_prefix}.mlp_1.1.weight"
-            )
-            mapping[f"params/layers_{i}/res_mlp_1_layer_1/bias"] = (
-                f"{torch_prefix}.mlp_1.1.bias"
-            )
-            mapping[f"params/layers_{i}/res_mlp_1_layer_2/kernel"] = (
-                f"{torch_prefix}.mlp_1.3.weight"
-            )
-            mapping[f"params/layers_{i}/res_mlp_1_layer_2/bias"] = (
-                f"{torch_prefix}.mlp_1.3.bias"
-            )
+            mapping[
+                f"params/layers_{i}/res_mlp_1_layer_1/kernel"
+            ] = f"{torch_prefix}.mlp_1.1.weight"
+            mapping[
+                f"params/layers_{i}/res_mlp_1_layer_1/bias"
+            ] = f"{torch_prefix}.mlp_1.1.bias"
+            mapping[
+                f"params/layers_{i}/res_mlp_1_layer_2/kernel"
+            ] = f"{torch_prefix}.mlp_1.3.weight"
+            mapping[
+                f"params/layers_{i}/res_mlp_1_layer_2/bias"
+            ] = f"{torch_prefix}.mlp_1.3.bias"
         if residual_mlp_2:
-            mapping[f"params/layers_{i}/res_mlp_2_layer_1/kernel"] = (
-                f"{torch_prefix}.mlp_2.1.weight"
-            )
-            mapping[f"params/layers_{i}/res_mlp_2_layer_1/bias"] = (
-                f"{torch_prefix}.mlp_2.1.bias"
-            )
-            mapping[f"params/layers_{i}/res_mlp_2_layer_2/kernel"] = (
-                f"{torch_prefix}.mlp_2.3.weight"
-            )
-            mapping[f"params/layers_{i}/res_mlp_2_layer_2/bias"] = (
-                f"{torch_prefix}.mlp_2.3.bias"
-            )
+            mapping[
+                f"params/layers_{i}/res_mlp_2_layer_1/kernel"
+            ] = f"{torch_prefix}.mlp_2.1.weight"
+            mapping[
+                f"params/layers_{i}/res_mlp_2_layer_1/bias"
+            ] = f"{torch_prefix}.mlp_2.1.bias"
+            mapping[
+                f"params/layers_{i}/res_mlp_2_layer_2/kernel"
+            ] = f"{torch_prefix}.mlp_2.3.weight"
+            mapping[
+                f"params/layers_{i}/res_mlp_2_layer_2/bias"
+            ] = f"{torch_prefix}.mlp_2.3.bias"
 
     # Output layers
-    mapping["params/observables_0/energy_dense_regression/kernel"] = (
-        "atomic_energy_output_block.layers.0.weight"
-    )
-    mapping["params/observables_0/energy_dense_regression/bias"] = (
-        "atomic_energy_output_block.layers.0.bias"
-    )
-    mapping["params/observables_0/energy_dense_final/kernel"] = (
-        "atomic_energy_output_block.final_layer.weight"
-    )
-    mapping["params/observables_0/energy_dense_final/bias"] = (
-        "atomic_energy_output_block.final_layer.bias"
-    )
+    mapping[
+        "params/observables_0/energy_dense_regression/kernel"
+    ] = "atomic_energy_output_block.layers.0.weight"
+    mapping[
+        "params/observables_0/energy_dense_regression/bias"
+    ] = "atomic_energy_output_block.layers.0.bias"
+    mapping[
+        "params/observables_0/energy_dense_final/kernel"
+    ] = "atomic_energy_output_block.final_layer.weight"
+    mapping[
+        "params/observables_0/energy_dense_final/bias"
+    ] = "atomic_energy_output_block.final_layer.bias"
     if energy_learn_atomic_type_shifts:
-        mapping["params/observables_0/energy_offset"] = (
-            "atomic_energy_output_block.energy_shifts"
-        )
+        mapping[
+            "params/observables_0/energy_offset"
+        ] = "atomic_energy_output_block.energy_shifts"
     if energy_learn_atomic_type_scales:
-        mapping["params/observables_0/atomic_scales"] = (
-            "atomic_energy_output_block.energy_scales.weight"
-        )
+        mapping[
+            "params/observables_0/atomic_scales"
+        ] = "atomic_energy_output_block.energy_scales.weight"
 
     params_obs = "params/observables_0/"
     if use_zbl:
@@ -297,7 +298,7 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
         mapping[f"{params_obs}zbl_repulsion/p"] = "zbl_repulsion.p_raw"
         mapping[f"{params_obs}zbl_repulsion/d"] = "zbl_repulsion.d_raw"
 
-    #if use_electrostatic_energy:
+    # if use_electrostatic_energy:
     mapping[
         f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"
     ] = "partial_charges_output_block.atomic_embedding.weight"
@@ -314,25 +315,25 @@ def get_flax_to_torch_mapping(cfg, trainable_rbf: bool):
         f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/bias"
     ] = "partial_charges_output_block.transform_inv_features.2.bias"
 
-    #if use_dispersion_energy:
-    mapping["params/observables_2/Embed_0/embedding"] = (
-        "hirshfeld_output_block.v_shift_embedding.weight"
-    )
-    mapping["params/observables_2/Embed_1/embedding"] = (
-        "hirshfeld_output_block.q_embedding.weight"
-    )
+    # if use_dispersion_energy:
+    mapping[
+        "params/observables_2/Embed_0/embedding"
+    ] = "hirshfeld_output_block.v_shift_embedding.weight"
+    mapping[
+        "params/observables_2/Embed_1/embedding"
+    ] = "hirshfeld_output_block.q_embedding.weight"
     mapping[
         "params/observables_2/hirshfeld_ratios_dense_regression/kernel"
     ] = "hirshfeld_output_block.transform_features.0.weight"
     mapping[
         "params/observables_2/hirshfeld_ratios_dense_regression/bias"
     ] = "hirshfeld_output_block.transform_features.0.bias"
-    mapping["params/observables_2/hirshfeld_ratios_dense_final/kernel"] = (
-        "hirshfeld_output_block.transform_features.2.weight"
-    )
-    mapping["params/observables_2/hirshfeld_ratios_dense_final/bias"] = (
-        "hirshfeld_output_block.transform_features.2.bias"
-    )
+    mapping[
+        "params/observables_2/hirshfeld_ratios_dense_final/kernel"
+    ] = "hirshfeld_output_block.transform_features.2.weight"
+    mapping[
+        "params/observables_2/hirshfeld_ratios_dense_final/bias"
+    ] = "hirshfeld_output_block.transform_features.2.bias"
 
     return mapping
 
@@ -345,7 +346,6 @@ def get_model_settings_flax_to_torch(
     trainable_rbf: bool = True,
     dtype: torch.dtype = torch.float32,
 ):
-
     return dict(
         r_max=cfg.model.cutoff,
         r_max_lr=cfg.model.cutoff_lr,
@@ -375,9 +375,9 @@ def get_model_settings_flax_to_torch(
         use_charge_embed=cfg.model.use_charge_embed,
         use_spin_embed=cfg.model.use_spin_embed,
         zbl_repulsion_bool=cfg.model.zbl_repulsion_bool,
-        electrostatic_energy_bool=True,# cfg.model.electrostatic_energy_bool, # always true, because its fuckting dumb how they handle the oberservable bools, turned false later
+        electrostatic_energy_bool=True,  # cfg.model.electrostatic_energy_bool, # always true, because its fuckting dumb how they handle the oberservable bools, turned false later
         electrostatic_energy_scale=cfg.model.electrostatic_energy_scale,
-        dispersion_energy_bool=True, # cfg.model.dispersion_energy_bool, # always true, because its fuckting dumb how they handle the oberservable bools, turned false later
+        dispersion_energy_bool=True,  # cfg.model.dispersion_energy_bool, # always true, because its fuckting dumb how they handle the oberservable bools, turned false later
         dispersion_energy_cutoff_lr_damping=cfg.model.dispersion_energy_cutoff_lr_damping,
         dispersion_energy_scale=cfg.model.dispersion_energy_scale,
         qk_non_linearity=cfg.model.qk_non_linearity,
@@ -433,7 +433,6 @@ def convert_flax_to_torch_params(
             flax_key == "params/observables_0/energy_offset"
             or flax_key == "params/observables_0/atomic_scales"
         ):
-            
             if torch_key == "atomic_energy_output_block.energy_shifts":
                 torched = torched[1:]
             else:
@@ -475,18 +474,14 @@ def convert_flax_to_torch(
     if hasattr(cfg.data, "energy_shifts"):
         energy_shifts_dict = cfg.data.energy_shifts.to_dict()
         # turn keys in to float, sort and then back to str
-        
-        energy_shifts_dict = {
-            int(k): v for k, v in energy_shifts_dict.items()
-        }
+
+        energy_shifts_dict = {int(k): v for k, v in energy_shifts_dict.items()}
         energy_shifts_dict = dict(
             sorted(energy_shifts_dict.items(), key=lambda item: item[0])
         )
         energy_shifts_dict.pop(0, None)
-        energy_shifts_dict = {
-            str(k): v for k, v in energy_shifts_dict.items()
-        }
-        
+        energy_shifts_dict = {str(k): v for k, v in energy_shifts_dict.items()}
+
     if save_torch_settings:
         serializable_settings = torch_model_settings.copy()
         if cfg.model.electrostatic_energy_bool is False:
@@ -498,28 +493,31 @@ def convert_flax_to_torch(
         serializable_settings["dtype"] = str(
             dtype
         )  # Convert torch.dtype to string
-        
+
         if hasattr(cfg.data, "energy_shifts"):
             serializable_settings["atomic_type_shifts"] = energy_shifts_dict
-            
-        settings_to_save = {
-            "ARCHITECTURE": serializable_settings
-        }
+
+        settings_to_save = {"ARCHITECTURE": serializable_settings}
         with open(save_torch_settings, "w") as f:
             yaml.dump(settings_to_save, f, default_flow_style=False)
 
     if so3lr:
         torch_model = SO3LR(**torch_model_settings)
-        torch_model.electrostatic_energy_bool = cfg.model.electrostatic_energy_bool
+        torch_model.electrostatic_energy_bool = (
+            cfg.model.electrostatic_energy_bool
+        )
         torch_model.dispersion_energy_bool = cfg.model.dispersion_energy_bool
         torch_model.zbl_repulsion_bool = cfg.model.zbl_repulsion_bool
-        if not cfg.model.electrostatic_energy_bool and not cfg.model.dispersion_energy_bool:
+        if (
+            not cfg.model.electrostatic_energy_bool
+            and not cfg.model.dispersion_energy_bool
+        ):
             torch_model.use_lr = False
     else:
         torch_model = So3krates(**torch_model_settings)
 
     state_dict = torch_model.state_dict()
-    
+
     torch_state_dict = convert_flax_to_torch_params(
         torch_state_dict=state_dict,
         flax_params=flax_params,
@@ -528,7 +526,7 @@ def convert_flax_to_torch(
         ),
         dtype=dtype,
     )
-    
+
     if hasattr(cfg.data, "energy_shifts"):
         torch_state_dict[
             "atomic_energy_output_block.energy_shifts"
@@ -539,20 +537,19 @@ def convert_flax_to_torch(
                 requires_grad=False,
             )
         )
-    
+
     if torch_save_path:
         torch.save(torch_state_dict, torch_save_path)
     torch_model.load_state_dict(torch_state_dict)
     torch_model.to(device)
-    
+
     if cfg.model.electrostatic_energy_bool is False:
         torch_model.electrostatic_energy_bool = False
     if cfg.model.dispersion_energy_bool is False:
         torch_model.dispersion_energy_bool = False
     if cfg.model.zbl_repulsion_bool is False:
         torch_model.zbl_repulsion_bool = False
-    
-    
+
     return torch_model
 
 
@@ -574,80 +571,80 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
     mapping = {}
 
     # Embedding layers
-    mapping["inv_feature_embedding.embedding.weight"] = (
-        "params/feature_embeddings_0/Embed_0/embedding"
-    )
+    mapping[
+        "inv_feature_embedding.embedding.weight"
+    ] = "params/feature_embeddings_0/Embed_0/embedding"
     if trainable_rbf:
-        mapping["radial_embedding.radial_basis_fn.centers"] = (
-            "params/geometry_embeddings_0/rbf_fn/centers"
-        )
-        mapping["radial_embedding.radial_basis_fn.widths"] = (
-            "params/geometry_embeddings_0/rbf_fn/widths"
-        )
+        mapping[
+            "radial_embedding.radial_basis_fn.centers"
+        ] = "params/geometry_embeddings_0/rbf_fn/centers"
+        mapping[
+            "radial_embedding.radial_basis_fn.widths"
+        ] = "params/geometry_embeddings_0/rbf_fn/widths"
 
     if use_charge_embed and not use_spin_embed:
-        mapping["charge_embedding.Wq.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"
-        )
-        mapping["charge_embedding.Wk"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"
-        )
-        mapping["charge_embedding.Wv"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"
-        )
-        mapping["charge_embedding.mlp.1.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
-        )
-        mapping["charge_embedding.mlp.3.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
-        )
+        mapping[
+            "charge_embedding.Wq.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"
+        mapping[
+            "charge_embedding.Wk"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"
+        mapping[
+            "charge_embedding.Wv"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"
+        mapping[
+            "charge_embedding.mlp.1.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
+        mapping[
+            "charge_embedding.mlp.3.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
     elif use_spin_embed and not use_charge_embed:
-        mapping["spin_embedding.Wq.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"
-        )
-        mapping["spin_embedding.Wk"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"
-        )
-        mapping["spin_embedding.Wv"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"
-        )
-        mapping["spin_embedding.mlp.1.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
-        )
-        mapping["spin_embedding.mlp.3.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
-        )
+        mapping[
+            "spin_embedding.Wq.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"
+        mapping[
+            "spin_embedding.Wk"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"
+        mapping[
+            "spin_embedding.Wv"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"
+        mapping[
+            "spin_embedding.mlp.1.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
+        mapping[
+            "spin_embedding.mlp.3.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
     elif use_charge_embed and use_spin_embed:
-        mapping["charge_embedding.Wq.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"
-        )
-        mapping["charge_embedding.Wk"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"
-        )
-        mapping["charge_embedding.Wv"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"
-        )
-        mapping["charge_embedding.mlp.1.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
-        )
-        mapping["charge_embedding.mlp.3.weight"] = (
-            "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
-        )
-        mapping["spin_embedding.Wq.weight"] = (
-            "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_0/embedding"
-        )
-        mapping["spin_embedding.Wk"] = (
-            "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_1/embedding"
-        )
-        mapping["spin_embedding.Wv"] = (
-            "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_2/embedding"
-        )
-        mapping["spin_embedding.mlp.1.weight"] = (
-            "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
-        )
-        mapping["spin_embedding.mlp.3.weight"] = (
-            "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
-        )
+        mapping[
+            "charge_embedding.Wq.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_0/embedding"
+        mapping[
+            "charge_embedding.Wk"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_1/embedding"
+        mapping[
+            "charge_embedding.Wv"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Embed_2/embedding"
+        mapping[
+            "charge_embedding.mlp.1.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
+        mapping[
+            "charge_embedding.mlp.3.weight"
+        ] = "params/feature_embeddings_1/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
+        mapping[
+            "spin_embedding.Wq.weight"
+        ] = "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_0/embedding"
+        mapping[
+            "spin_embedding.Wk"
+        ] = "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_1/embedding"
+        mapping[
+            "spin_embedding.Wv"
+        ] = "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Embed_2/embedding"
+        mapping[
+            "spin_embedding.mlp.1.weight"
+        ] = "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Residual_0/layers_0/kernel"
+        mapping[
+            "spin_embedding.mlp.3.weight"
+        ] = "params/feature_embeddings_2/ChargeSpinEmbedSparse_0/Residual_0/layers_1/kernel"
 
     # Per-layer transformer mappings
     for i in range(num_layers):
@@ -655,12 +652,12 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
         torch_prefix = f"euclidean_transformers.{i}"
 
         # Radial filters (inv)
-        mapping[f"{torch_prefix}.filter_net_inv.mlp_rbf.0.weight"] = (
-            f"{flax_prefix}/radial_filter1_layer_1/kernel"
-        )
-        mapping[f"{torch_prefix}.filter_net_inv.mlp_rbf.0.bias"] = (
-            f"{flax_prefix}/radial_filter1_layer_1/bias"
-        )
+        mapping[
+            f"{torch_prefix}.filter_net_inv.mlp_rbf.0.weight"
+        ] = f"{flax_prefix}/radial_filter1_layer_1/kernel"
+        mapping[
+            f"{torch_prefix}.filter_net_inv.mlp_rbf.0.bias"
+        ] = f"{flax_prefix}/radial_filter1_layer_1/bias"
         mapping[
             f"{torch_prefix}.filter_net_inv.mlp_rbf.mlp_rbf_layer_1.0.weight"
         ] = f"{flax_prefix}/radial_filter1_layer_2/kernel"
@@ -669,12 +666,12 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
         ] = f"{flax_prefix}/radial_filter1_layer_2/bias"
 
         # Radial filters (ev)
-        mapping[f"{torch_prefix}.filter_net_ev.mlp_rbf.0.weight"] = (
-            f"{flax_prefix}/radial_filter2_layer_1/kernel"
-        )
-        mapping[f"{torch_prefix}.filter_net_ev.mlp_rbf.0.bias"] = (
-            f"{flax_prefix}/radial_filter2_layer_1/bias"
-        )
+        mapping[
+            f"{torch_prefix}.filter_net_ev.mlp_rbf.0.weight"
+        ] = f"{flax_prefix}/radial_filter2_layer_1/kernel"
+        mapping[
+            f"{torch_prefix}.filter_net_ev.mlp_rbf.0.bias"
+        ] = f"{flax_prefix}/radial_filter2_layer_1/bias"
         mapping[
             f"{torch_prefix}.filter_net_ev.mlp_rbf.mlp_rbf_layer_1.0.weight"
         ] = f"{flax_prefix}/radial_filter2_layer_2/kernel"
@@ -683,12 +680,12 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
         ] = f"{flax_prefix}/radial_filter2_layer_2/bias"
 
         # Spherical filters (inv)
-        mapping[f"{torch_prefix}.filter_net_inv.mlp_ev.0.weight"] = (
-            f"{flax_prefix}/spherical_filter1_layer_1/kernel"
-        )
-        mapping[f"{torch_prefix}.filter_net_inv.mlp_ev.0.bias"] = (
-            f"{flax_prefix}/spherical_filter1_layer_1/bias"
-        )
+        mapping[
+            f"{torch_prefix}.filter_net_inv.mlp_ev.0.weight"
+        ] = f"{flax_prefix}/spherical_filter1_layer_1/kernel"
+        mapping[
+            f"{torch_prefix}.filter_net_inv.mlp_ev.0.bias"
+        ] = f"{flax_prefix}/spherical_filter1_layer_1/bias"
         mapping[
             f"{torch_prefix}.filter_net_inv.mlp_ev.mlp_ev_layer_1.0.weight"
         ] = f"{flax_prefix}/spherical_filter1_layer_2/kernel"
@@ -697,12 +694,12 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
         ] = f"{flax_prefix}/spherical_filter1_layer_2/bias"
 
         # Spherical filters (ev)
-        mapping[f"{torch_prefix}.filter_net_ev.mlp_ev.0.weight"] = (
-            f"{flax_prefix}/spherical_filter2_layer_1/kernel"
-        )
-        mapping[f"{torch_prefix}.filter_net_ev.mlp_ev.0.bias"] = (
-            f"{flax_prefix}/spherical_filter2_layer_1/bias"
-        )
+        mapping[
+            f"{torch_prefix}.filter_net_ev.mlp_ev.0.weight"
+        ] = f"{flax_prefix}/spherical_filter2_layer_1/kernel"
+        mapping[
+            f"{torch_prefix}.filter_net_ev.mlp_ev.0.bias"
+        ] = f"{flax_prefix}/spherical_filter2_layer_1/bias"
         mapping[
             f"{torch_prefix}.filter_net_ev.mlp_ev.mlp_ev_layer_1.0.weight"
         ] = f"{flax_prefix}/spherical_filter2_layer_2/kernel"
@@ -711,96 +708,96 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
         ] = f"{flax_prefix}/spherical_filter2_layer_2/bias"
 
         # Attention weights
-        mapping[f"{torch_prefix}.euclidean_attention_block.W_q_inv"] = (
-            f"{flax_prefix}/Wq1"
-        )
-        mapping[f"{torch_prefix}.euclidean_attention_block.W_k_inv"] = (
-            f"{flax_prefix}/Wk1"
-        )
-        mapping[f"{torch_prefix}.euclidean_attention_block.W_v_inv"] = (
-            f"{flax_prefix}/Wv1"
-        )
-        mapping[f"{torch_prefix}.euclidean_attention_block.W_q_ev"] = (
-            f"{flax_prefix}/Wq2"
-        )
-        mapping[f"{torch_prefix}.euclidean_attention_block.W_k_ev"] = (
-            f"{flax_prefix}/Wk2"
-        )
+        mapping[
+            f"{torch_prefix}.euclidean_attention_block.W_q_inv"
+        ] = f"{flax_prefix}/Wq1"
+        mapping[
+            f"{torch_prefix}.euclidean_attention_block.W_k_inv"
+        ] = f"{flax_prefix}/Wk1"
+        mapping[
+            f"{torch_prefix}.euclidean_attention_block.W_v_inv"
+        ] = f"{flax_prefix}/Wv1"
+        mapping[
+            f"{torch_prefix}.euclidean_attention_block.W_q_ev"
+        ] = f"{flax_prefix}/Wq2"
+        mapping[
+            f"{torch_prefix}.euclidean_attention_block.W_k_ev"
+        ] = f"{flax_prefix}/Wk2"
 
         # Exchange block
-        mapping[f"{torch_prefix}.interaction_block.linear_layer.weight"] = (
-            f"params/layers_{i}/exchange_block/mlp_layer_2/kernel"
-        )
-        mapping[f"{torch_prefix}.interaction_block.linear_layer.bias"] = (
-            f"params/layers_{i}/exchange_block/mlp_layer_2/bias"
-        )
+        mapping[
+            f"{torch_prefix}.interaction_block.linear_layer.weight"
+        ] = f"params/layers_{i}/exchange_block/mlp_layer_2/kernel"
+        mapping[
+            f"{torch_prefix}.interaction_block.linear_layer.bias"
+        ] = f"params/layers_{i}/exchange_block/mlp_layer_2/bias"
 
         # Layer normalization
         if layer_norm_1:
-            mapping[f"{torch_prefix}.layer_norm_inv_1.weight"] = (
-                f"params/layers_{i}/layer_normalization_1/scale"
-            )
-            mapping[f"{torch_prefix}.layer_norm_inv_1.bias"] = (
-                f"params/layers_{i}/layer_normalization_1/bias"
-            )
+            mapping[
+                f"{torch_prefix}.layer_norm_inv_1.weight"
+            ] = f"params/layers_{i}/layer_normalization_1/scale"
+            mapping[
+                f"{torch_prefix}.layer_norm_inv_1.bias"
+            ] = f"params/layers_{i}/layer_normalization_1/bias"
         if layer_norm_2:
-            mapping[f"{torch_prefix}.layer_norm_inv_2.weight"] = (
-                f"params/layers_{i}/layer_normalization_2/scale"
-            )
-            mapping[f"{torch_prefix}.layer_norm_inv_2.bias"] = (
-                f"params/layers_{i}/layer_normalization_2/bias"
-            )
+            mapping[
+                f"{torch_prefix}.layer_norm_inv_2.weight"
+            ] = f"params/layers_{i}/layer_normalization_2/scale"
+            mapping[
+                f"{torch_prefix}.layer_norm_inv_2.bias"
+            ] = f"params/layers_{i}/layer_normalization_2/bias"
 
         # Residual MLPs
         if residual_mlp_1:
-            mapping[f"{torch_prefix}.mlp_1.1.weight"] = (
-                f"params/layers_{i}/res_mlp_1_layer_1/kernel"
-            )
-            mapping[f"{torch_prefix}.mlp_1.1.bias"] = (
-                f"params/layers_{i}/res_mlp_1_layer_1/bias"
-            )
-            mapping[f"{torch_prefix}.mlp_1.3.weight"] = (
-                f"params/layers_{i}/res_mlp_1_layer_2/kernel"
-            )
-            mapping[f"{torch_prefix}.mlp_1.3.bias"] = (
-                f"params/layers_{i}/res_mlp_1_layer_2/bias"
-            )
+            mapping[
+                f"{torch_prefix}.mlp_1.1.weight"
+            ] = f"params/layers_{i}/res_mlp_1_layer_1/kernel"
+            mapping[
+                f"{torch_prefix}.mlp_1.1.bias"
+            ] = f"params/layers_{i}/res_mlp_1_layer_1/bias"
+            mapping[
+                f"{torch_prefix}.mlp_1.3.weight"
+            ] = f"params/layers_{i}/res_mlp_1_layer_2/kernel"
+            mapping[
+                f"{torch_prefix}.mlp_1.3.bias"
+            ] = f"params/layers_{i}/res_mlp_1_layer_2/bias"
         if residual_mlp_2:
-            mapping[f"{torch_prefix}.mlp_2.1.weight"] = (
-                f"params/layers_{i}/res_mlp_2_layer_1/kernel"
-            )
-            mapping[f"{torch_prefix}.mlp_2.1.bias"] = (
-                f"params/layers_{i}/res_mlp_2_layer_1/bias"
-            )
-            mapping[f"{torch_prefix}.mlp_2.3.weight"] = (
-                f"params/layers_{i}/res_mlp_2_layer_2/kernel"
-            )
-            mapping[f"{torch_prefix}.mlp_2.3.bias"] = (
-                f"params/layers_{i}/res_mlp_2_layer_2/bias"
-            )
+            mapping[
+                f"{torch_prefix}.mlp_2.1.weight"
+            ] = f"params/layers_{i}/res_mlp_2_layer_1/kernel"
+            mapping[
+                f"{torch_prefix}.mlp_2.1.bias"
+            ] = f"params/layers_{i}/res_mlp_2_layer_1/bias"
+            mapping[
+                f"{torch_prefix}.mlp_2.3.weight"
+            ] = f"params/layers_{i}/res_mlp_2_layer_2/kernel"
+            mapping[
+                f"{torch_prefix}.mlp_2.3.bias"
+            ] = f"params/layers_{i}/res_mlp_2_layer_2/bias"
 
     # Output layers
-    mapping["atomic_energy_output_block.layers.0.weight"] = (
-        "params/observables_0/energy_dense_regression/kernel"
-    )
-    mapping["atomic_energy_output_block.layers.0.bias"] = (
-        "params/observables_0/energy_dense_regression/bias"
-    )
-    mapping["atomic_energy_output_block.final_layer.weight"] = (
-        "params/observables_0/energy_dense_final/kernel"
-    )
-    mapping["atomic_energy_output_block.final_layer.bias"] = (
-        "params/observables_0/energy_dense_final/bias"
-    )
-    mapping["atomic_energy_output_block.energy_shifts"] = (
-        "params/observables_0/energy_offset"
-    )
-    mapping["atomic_energy_output_block.energy_scales.weight"] = (
-        "params/observables_0/atomic_scales"
-    )
+    mapping[
+        "atomic_energy_output_block.layers.0.weight"
+    ] = "params/observables_0/energy_dense_regression/kernel"
+    mapping[
+        "atomic_energy_output_block.layers.0.bias"
+    ] = "params/observables_0/energy_dense_regression/bias"
+    mapping[
+        "atomic_energy_output_block.final_layer.weight"
+    ] = "params/observables_0/energy_dense_final/kernel"
+    mapping[
+        "atomic_energy_output_block.final_layer.bias"
+    ] = "params/observables_0/energy_dense_final/bias"
+    mapping[
+        "atomic_energy_output_block.energy_shifts"
+    ] = "params/observables_0/energy_offset"
+    mapping[
+        "atomic_energy_output_block.energy_scales.weight"
+    ] = "params/observables_0/atomic_scales"
 
     params_obs = "params/observables_0/"
-    #if use_zbl:
+    # if use_zbl:
     mapping["zbl_repulsion.a1_raw"] = f"{params_obs}zbl_repulsion/a1"
     mapping["zbl_repulsion.a2_raw"] = f"{params_obs}zbl_repulsion/a2"
     mapping["zbl_repulsion.a3_raw"] = f"{params_obs}zbl_repulsion/a3"
@@ -812,10 +809,10 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
     mapping["zbl_repulsion.p_raw"] = f"{params_obs}zbl_repulsion/p"
     mapping["zbl_repulsion.d_raw"] = f"{params_obs}zbl_repulsion/d"
 
-    #if use_electrostatic_energy:
-    mapping["partial_charges_output_block.atomic_embedding.weight"] = (
-        f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"
-    )
+    # if use_electrostatic_energy:
+    mapping[
+        "partial_charges_output_block.atomic_embedding.weight"
+    ] = f"{params_obs}electrostatic_energy/partial_charges/Embed_0/embedding"
     mapping[
         "partial_charges_output_block.transform_inv_features.0.weight"
     ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_regression_vec/kernel"
@@ -829,25 +826,25 @@ def get_torch_to_flax_mapping(cfg, trainable_rbf: bool):
         "partial_charges_output_block.transform_inv_features.2.bias"
     ] = f"{params_obs}electrostatic_energy/partial_charges/charge_dense_final_vec/bias"
 
-    #if use_dispersion_energy:
-    mapping["hirshfeld_output_block.v_shift_embedding.weight"] = (
-        "params/observables_2/Embed_0/embedding"
-    )
-    mapping["hirshfeld_output_block.q_embedding.weight"] = (
-        "params/observables_2/Embed_1/embedding"
-    )
-    mapping["hirshfeld_output_block.transform_features.0.weight"] = (
-        "params/observables_2/hirshfeld_ratios_dense_regression/kernel"
-    )
-    mapping["hirshfeld_output_block.transform_features.0.bias"] = (
-        "params/observables_2/hirshfeld_ratios_dense_regression/bias"
-    )
-    mapping["hirshfeld_output_block.transform_features.2.weight"] = (
-        "params/observables_2/hirshfeld_ratios_dense_final/kernel"
-    )
-    mapping["hirshfeld_output_block.transform_features.2.bias"] = (
-        "params/observables_2/hirshfeld_ratios_dense_final/bias"
-    )
+    # if use_dispersion_energy:
+    mapping[
+        "hirshfeld_output_block.v_shift_embedding.weight"
+    ] = "params/observables_2/Embed_0/embedding"
+    mapping[
+        "hirshfeld_output_block.q_embedding.weight"
+    ] = "params/observables_2/Embed_1/embedding"
+    mapping[
+        "hirshfeld_output_block.transform_features.0.weight"
+    ] = "params/observables_2/hirshfeld_ratios_dense_regression/kernel"
+    mapping[
+        "hirshfeld_output_block.transform_features.0.bias"
+    ] = "params/observables_2/hirshfeld_ratios_dense_regression/bias"
+    mapping[
+        "hirshfeld_output_block.transform_features.2.weight"
+    ] = "params/observables_2/hirshfeld_ratios_dense_final/kernel"
+    mapping[
+        "hirshfeld_output_block.transform_features.2.bias"
+    ] = "params/observables_2/hirshfeld_ratios_dense_final/bias"
 
     return mapping
 
@@ -1014,7 +1011,9 @@ def convert_torch_to_flax_params(
             if "energy_shifts" in torch_key:
                 numpy_array = numpy_array.squeeze()  # Remove extra dimensions
             else:
-                numpy_array = numpy_array.squeeze(0)  # Remove the (1,) dimension
+                numpy_array = numpy_array.squeeze(
+                    0
+                )  # Remove the (1,) dimension
             padding = np.zeros((1,), dtype=numpy_array.dtype)
             numpy_array = np.concatenate([padding, numpy_array], axis=0)
 
@@ -1048,20 +1047,22 @@ def convert_torch_to_flax(
     """
     # Convert torch settings to flax config
     cfg = get_model_settings_torch_to_flax(torch_settings)
-    
-    energy_shifts = torch_state_dict.get("atomic_energy_output_block.energy_shifts", None)
+
+    energy_shifts = torch_state_dict.get(
+        "atomic_energy_output_block.energy_shifts", None
+    )
 
     # turn energy_shifts into dict:
     energy_shifts_dict = {
-        0: 0.0,  # padding for atomic number 0
+        "0": 0.0,  # padding for atomic number 0
     }
     for i in range(1, 119):
         if energy_shifts is not None:
-            energy_shifts_dict[i] = energy_shifts[i-1].item()
+            energy_shifts_dict[str(i)] = energy_shifts[i - 1].item()
         else:
-            energy_shifts_dict[i] = 0.0
+            energy_shifts_dict[str(i)] = 0.0
     cfg.data.energy_shifts = config_dict.ConfigDict(energy_shifts_dict)
-        
+
     # Get the parameter mapping
     mapping = get_torch_to_flax_mapping(cfg, trainable_rbf)
 
