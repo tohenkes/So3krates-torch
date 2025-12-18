@@ -13,6 +13,7 @@ from so3krates_torch.blocks.output_block import (
     PartialChargesOutputHead,
     DipoleVecOutputHead,
     HirshfeldOutputHead,
+    DirectForceOutputHead,
 )
 from so3krates_torch.blocks import radial_basis
 import math
@@ -252,7 +253,6 @@ class So3krates(torch.nn.Module):
         lammps_mliap: bool = False,
         return_att: bool = False,
     ):
-
         self._get_graph(
             data=data,
             compute_virials=compute_virials,
@@ -286,7 +286,7 @@ class So3krates(torch.nn.Module):
 
         ######### EMBEDDING #########
         inv_features = self.inv_feature_embedding(data["node_attrs"])
-        
+
         if self.use_charge_embed:
             inv_features += self.charge_embedding(
                 elements_one_hot=data["node_attrs"],
@@ -330,9 +330,11 @@ class So3krates(torch.nn.Module):
                 return_att=return_att,
             )
             if return_att:
-                (inv_features, ev_features, (alpha_inv, alpha_ev)) = (
-                    transformer_output
-                )
+                (
+                    inv_features,
+                    ev_features,
+                    (alpha_inv, alpha_ev),
+                ) = transformer_output
                 att_scores["inv"][layer_idx] = alpha_inv
                 att_scores["ev"][layer_idx] = alpha_ev
 
@@ -382,7 +384,6 @@ class So3krates(torch.nn.Module):
         return_descriptors: bool = False,
         return_att: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
         self.batch_segments = data["batch"]
         self.data_ptr = data["ptr"]
 
@@ -477,12 +478,12 @@ class SO3LR(So3krates):
 
         # Short-range repulsion
         self.zbl_repulsion = ZBLRepulsion()
-        
+
         # i'm sorry for this. but in the jax version they always initiate
         # the long range modules even though the booleans are set to false.
         # if didn't do this there would be problems when converting models
         # to jax back and forth ... its ugly and wasteful, i know.
-        
+
         # Electrostatics
         if self.electrostatic_energy_bool:
             self.use_lr = True
@@ -507,6 +508,7 @@ class SO3LR(So3krates):
         self.dispersion_potential = DispersionInteraction(
             neighborlist_format_lr=self.neighborlist_format_lr
         )
+
     def _get_graph(
         self,
         data: Dict[str, torch.Tensor],
@@ -532,7 +534,6 @@ class SO3LR(So3krates):
         electrostatic_energies: Optional[torch.Tensor] = None,
         dispersion_energies: Optional[torch.Tensor] = None,
     ):
-
         torch.set_printoptions(precision=8)
         if self.zbl_repulsion_bool and zbl_atomic_energies is not None:
             atomic_energies += zbl_atomic_energies
@@ -590,7 +591,6 @@ class SO3LR(So3krates):
         att_scores: torch.Tensor,
         training: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
         return {
             "energy": total_energy,
             "forces": forces,
@@ -621,7 +621,6 @@ class SO3LR(So3krates):
         lammps_mliap: bool = False,
         return_att: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
         self.batch_segments = data["batch"]
         self.data_ptr = data["ptr"]
         repr_output = self.get_representation(
@@ -646,9 +645,7 @@ class SO3LR(So3krates):
             data,
             atomic_numbers=data["atomic_numbers"],
         )
-        
 
-        
         if self.use_lr:
             self.receivers_lr, self.senders_lr = (
                 data["edge_index_lr"][0],
@@ -800,7 +797,6 @@ class MultiHeadSO3LR(SO3LR):
         compute_edge_forces: bool = False,
         batch: Optional[torch.tensor] = None,
     ):
-
         forces, virials, stress, hessian, edge_forces = utils.get_outputs(
             energy=energy,
             positions=positions,
@@ -840,8 +836,7 @@ class MultiHeadSO3LR(SO3LR):
     def _select_heads(
         self,
         output_dict: dict,
-        ) -> dict:
-        
+    ) -> dict:
         row_indices = torch.arange(
             output_dict["energy"].shape[1],
             device=self.device,
@@ -859,7 +854,7 @@ class MultiHeadSO3LR(SO3LR):
         output_dict["forces"] = output_dict["forces"][
             head_index_repeated, full_node_index
         ]
-        
+
         if output_dict["stress"] is not None:
             output_dict["stress"] = output_dict["stress"][
                 self.head_idxs, row_indices
@@ -868,7 +863,7 @@ class MultiHeadSO3LR(SO3LR):
             output_dict["virials"] = output_dict["virials"][
                 self.head_idxs, row_indices
             ]
-        
+
         return output_dict
 
     def _create_output_dict(
@@ -887,8 +882,6 @@ class MultiHeadSO3LR(SO3LR):
         att_scores: torch.Tensor,
         training: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
-        
         # total_energy has shape (num_graphs, num_output_heads)
         # permute to shape (num_output_heads, num_graphs)
         total_energy = total_energy.permute(1, 0)
@@ -907,11 +900,11 @@ class MultiHeadSO3LR(SO3LR):
             "att_scores": att_scores,
         }
         if self.select_heads:
-            assert not self.return_mean, (
-                "Cannot both select heads and return mean."
-            )
+            assert (
+                not self.return_mean
+            ), "Cannot both select heads and return mean."
             output_dict = self._select_heads(output_dict)
-            
+
         if self.return_mean:
             mean_properties = [
                 "energy",
@@ -924,5 +917,94 @@ class MultiHeadSO3LR(SO3LR):
             for k, v in output_dict.items():
                 if v is not None and k in mean_properties:
                     output_dict[k] = v.mean(dim=0)
-            
+
         return output_dict
+
+
+class DirectForceSo3krates(So3krates):
+    def __init__(
+        self,
+        force_activation_fn: Optional[
+            Callable[[torch.Tensor], torch.Tensor]
+        ] = torch.nn.SiLU,
+        force_regression_dim: Optional[int] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+
+        self.force_regression_dim = force_regression_dim
+        self.force_activation_fn = force_activation_fn
+        self.force_output_head = DirectForceOutputHead(
+            num_features=self.num_features,
+            force_regression_dim=self.force_regression_dim,
+            layers=self.final_mlp_layers,
+            bias=True,
+            non_linearity=self.force_activation_fn,
+            device=self.device,
+        )
+
+    def forward(
+        self,
+        data: Dict[str, torch.Tensor],
+        training: bool = False,
+        compute_force: bool = True,
+        compute_virials: bool = False,
+        compute_stress: bool = False,
+        compute_displacement: bool = False,
+        compute_hessian: bool = False,
+        compute_edge_forces: bool = False,
+        compute_atomic_stresses: bool = False,
+        lammps_mliap: bool = False,
+        return_descriptors: bool = False,
+        return_att: bool = False,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        self.batch_segments = data["batch"]
+        self.data_ptr = data["ptr"]
+
+        repr_output = self.get_representation(
+            data=data,
+            compute_force=compute_force,
+            compute_virials=compute_virials,
+            compute_stress=compute_stress,
+            compute_displacement=compute_displacement,
+            compute_hessian=compute_hessian,
+            compute_edge_forces=compute_edge_forces,
+            lammps_mliap=lammps_mliap,
+            return_att=return_att,
+        )
+        if return_att:
+            inv_features, ev_features, att_scores = repr_output
+        else:
+            inv_features, ev_features = repr_output
+
+        ######### OUTPUT #########
+        atomic_energies = self.atomic_energy_output_block(
+            inv_features,
+            data,
+        )
+
+        total_energy = scatter.scatter_sum(
+            src=atomic_energies,
+            index=self.batch_segments,
+            dim=0,
+            dim_size=self.data_ptr.shape[0] - 1,
+        ).squeeze(-1)
+
+        forces = self.force_output_head(
+            inv_features,
+            self.positions,
+            data,
+        )
+
+        return self._create_output_dict(
+            total_energy=total_energy,
+            forces=forces,
+            virials=None,
+            stress=None,
+            hessian=None,
+            edge_forces=None,
+            inv_features=inv_features if return_descriptors else None,
+            att_scores=att_scores if return_att else None,
+            training=training,
+        )

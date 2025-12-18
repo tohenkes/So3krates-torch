@@ -49,14 +49,18 @@ class AtomicEnergyOutputHead(nn.Module):
 
         self.energy_shifts = nn.Parameter(
             torch.zeros(
-                num_elements, dtype=torch.get_default_dtype(),
-                device=self.device
+                num_elements,
+                dtype=torch.get_default_dtype(),
+                device=self.device,
             ),
             requires_grad=False,
         )
         self.energy_scales = nn.Linear(
-            num_elements,1, bias=False, dtype=torch.get_default_dtype(),
-            device=self.device
+            num_elements,
+            1,
+            bias=False,
+            dtype=torch.get_default_dtype(),
+            device=self.device,
         )
         nn.init.ones_(self.energy_scales.weight)
         self.energy_scales.weight.requires_grad = False
@@ -88,13 +92,14 @@ class AtomicEnergyOutputHead(nn.Module):
                 atomic_type_shifts=atomic_type_shifts
             )
 
-
         self.enable_learned_energy_shifts_and_scales()
-        
+
     def set_defined_energy_shifts(
-            self,
-            atomic_type_shifts: Union[Dict[str, float], torch.Tensor, nn.Parameter]
-            ):
+        self,
+        atomic_type_shifts: Union[
+            Dict[str, float], torch.Tensor, nn.Parameter
+        ],
+    ):
         if isinstance(atomic_type_shifts, dict):
             self.energy_shifts = nn.Parameter(
                 torch.tensor(
@@ -104,23 +109,21 @@ class AtomicEnergyOutputHead(nn.Module):
                     device=self.device,
                 )
             )
-        elif isinstance(atomic_type_shifts, torch.Tensor) or isinstance(atomic_type_shifts, nn.Parameter):
-            
+        elif isinstance(atomic_type_shifts, torch.Tensor) or isinstance(
+            atomic_type_shifts, nn.Parameter
+        ):
             atomic_type_shifts.to(self.device)
             atomic_type_shifts.requires_grad = False
-            
+
             self.energy_shifts = nn.Parameter(
-                atomic_type_shifts.to(
-                    dtype=torch.get_default_dtype()
-                )
+                atomic_type_shifts.to(dtype=torch.get_default_dtype())
             )
         else:
             raise ValueError(
                 "atomic_type_shifts must be either a dict, torch.Tensor, or nn.Parameter."
             )
         self.enable_learned_energy_shifts_and_scales()
-        
-        
+
     def enable_learned_energy_shifts_and_scales(self):
         if self.energy_learn_atomic_type_shifts:
             self.energy_shifts.requires_grad = True
@@ -131,14 +134,14 @@ class AtomicEnergyOutputHead(nn.Module):
         # JAX init (lecun normal)
         for m in self.layers:
             if isinstance(m, torch.nn.Linear):
-                std = 1.0 / (m.in_features ** 0.5)
+                std = 1.0 / (m.in_features**0.5)
                 torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
         # Final layer
         m = self.final_layer
         if isinstance(m, torch.nn.Linear):
-            std = 1.0 / (m.in_features ** 0.5)
+            std = 1.0 / (m.in_features**0.5)
             torch.nn.init.normal_(m.weight, mean=0.0, std=std)
             if m.bias is not None:
                 torch.nn.init.zeros_(m.bias)
@@ -157,12 +160,11 @@ class AtomicEnergyOutputHead(nn.Module):
         atomic_energies = self.final_layer(inv_features)
         if self.final_non_linearity:
             atomic_energies = self.non_linearity(inv_features)
-            
+
         one_hot = data["node_attrs"]
         atomic_number_idx = torch.argmax(one_hot, dim=1)
         atomic_energies *= self.energy_scales(data["node_attrs"])
         atomic_energies += self.energy_shifts[atomic_number_idx].unsqueeze(1)
-
 
         return atomic_energies
 
@@ -222,12 +224,12 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                     device=device,
                 )
             )
-            
+
             # JAX init (lecun normal)
             std = 1.0 / (multi_head_weights.size(1) ** 0.5)
             torch.nn.init.normal_(multi_head_weights, mean=0.0, std=std)
             torch.nn.init.zeros_(multi_head_bias)
-            
+
             self.layers_weights.append(multi_head_weights)
             self.layers_bias.append(multi_head_bias)
 
@@ -248,12 +250,12 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                 device=device,
             )
         )
-        
+
         # JAX init (lecun normal)
         std = 1.0 / (multi_head_final_weights.size(1) ** 0.5)
         torch.nn.init.normal_(multi_head_final_weights, mean=0.0, std=std)
         torch.nn.init.zeros_(multi_head_final_bias)
-        
+
         self.final_layer_weights = multi_head_final_weights
         self.final_layer_bias = multi_head_final_bias
 
@@ -261,21 +263,19 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
         # Initialize energy_shifts for all heads with zeros (or defined shifts)
         self.energy_shifts = nn.Parameter(
             torch.zeros(
-                num_elements, dtype=torch.get_default_dtype(),
-                device=device
+                num_elements, dtype=torch.get_default_dtype(), device=device
             ),
             requires_grad=False,
         )
-        
+
         # Initialize energy_scales for all heads
         self.energy_scales = nn.Parameter(
             torch.ones(
-                num_elements, 1, dtype=torch.get_default_dtype(),
-                device=device
+                num_elements, 1, dtype=torch.get_default_dtype(), device=device
             ),
             requires_grad=False,
         )
-        
+
         # Handle defined atomic type shifts (same for all heads)
         if atomic_type_shifts is not None:
             # Remove element zero if present
@@ -296,7 +296,7 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                 ),
                 requires_grad=False,
             )
-        
+
         # Enable gradient if requested
         self.enable_learned_energy_shifts_and_scales()
 
@@ -312,7 +312,6 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
         data: Dict[str, torch.Tensor],
         atomic_numbers: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-
         for layer_weights, layer_bias in zip(
             self.layers_weights, self.layers_bias
         ):
@@ -331,10 +330,8 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
         if self.final_non_linearity:
             atomic_energies = self.non_linearity(atomic_energies)
 
-
         one_hot = data["node_attrs"]
         atomic_number_idx = torch.argmax(one_hot, dim=1)
-
 
         one_hot = data["node_attrs"]
         scales = torch.matmul(one_hot, self.energy_scales)
@@ -375,20 +372,20 @@ class PartialChargesOutputHead(nn.Module):
 
     def reset_parameters(self):
         # JAX init (lecun normal) - embedding
-        std = 1.0 / (self.atomic_embedding.embedding_dim ** 0.5)
+        std = 1.0 / (self.atomic_embedding.embedding_dim**0.5)
         torch.nn.init.normal_(self.atomic_embedding.weight, mean=0.0, std=std)
         # JAX init (lecun normal) - linear layers
         if isinstance(self.transform_inv_features, nn.Sequential):
             for m in self.transform_inv_features:
                 if isinstance(m, torch.nn.Linear):
-                    std = 1.0 / (m.in_features ** 0.5)
+                    std = 1.0 / (m.in_features**0.5)
                     torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                     if m.bias is not None:
                         torch.nn.init.zeros_(m.bias)
         else:
             m = self.transform_inv_features
             if isinstance(m, torch.nn.Linear):
-                std = 1.0 / (m.in_features ** 0.5)
+                std = 1.0 / (m.in_features**0.5)
                 torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
@@ -401,7 +398,6 @@ class PartialChargesOutputHead(nn.Module):
         batch_segments: torch.Tensor,
         num_graphs: int,
     ) -> Dict[str, torch.Tensor]:
-
         # q_ - element-dependent bias
         q_ = self.atomic_embedding(atomic_numbers).squeeze(-1)
         x_ = self.transform_inv_features(inv_features).squeeze(-1)
@@ -439,7 +435,6 @@ class DipoleVecOutputHead(nn.Module):
         batch_segments: torch.Tensor,
         num_graphs: int,
     ) -> Dict[str, torch.Tensor]:
-
         mu_i = positions * partial_charges[:, None]
 
         # Compute the total dipole moment for each molecule
@@ -485,22 +480,22 @@ class HirshfeldOutputHead(nn.Module):
 
     def reset_parameters(self):
         # JAX init (lecun normal) - embeddings
-        std = 1.0 / (self.v_shift_embedding.embedding_dim ** 0.5)
+        std = 1.0 / (self.v_shift_embedding.embedding_dim**0.5)
         torch.nn.init.normal_(self.v_shift_embedding.weight, mean=0.0, std=std)
-        std = 1.0 / (self.q_embedding.embedding_dim ** 0.5)
+        std = 1.0 / (self.q_embedding.embedding_dim**0.5)
         torch.nn.init.normal_(self.q_embedding.weight, mean=0.0, std=std)
         # JAX init (lecun normal) - linear layers
         if isinstance(self.transform_features, nn.Sequential):
             for m in self.transform_features:
                 if isinstance(m, torch.nn.Linear):
-                    std = 1.0 / (m.in_features ** 0.5)
+                    std = 1.0 / (m.in_features**0.5)
                     torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                     if m.bias is not None:
                         torch.nn.init.zeros_(m.bias)
         else:
             m = self.transform_features
             if isinstance(m, torch.nn.Linear):
-                std = 1.0 / (m.in_features ** 0.5)
+                std = 1.0 / (m.in_features**0.5)
                 torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
@@ -544,6 +539,167 @@ class HirshfeldOutputHead(nn.Module):
 
 
 class DirectForceOutputHead(nn.Module):
-    def __init__(self, num_features: int):
-        raise NotImplementedError("DirectForceOutputHead is not implemented yet.")
+    def __init__(
+        self,
+        num_features: int,
+        force_regression_dim: Optional[int] = None,
+        layers: int = 2,
+        bias: bool = True,
+        use_non_linearity: bool = True,
+        non_linearity: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        final_non_linearity: bool = False,
+        device: str = "cpu",
+    ):
+        super().__init__()
+        self.device = device
+        self.layers = nn.ModuleList()
+        if force_regression_dim is None:
+            force_regression_dim = num_features
 
+        for _ in range(layers - 1):
+            self.layers.append(
+                nn.Linear(num_features, force_regression_dim, bias=bias)
+            )
+        self.final_layer = nn.Linear(force_regression_dim, 3, bias=bias)
+        # make sure non_linearity is not None if use_non_linearity is True
+        if use_non_linearity and non_linearity is None:
+            raise ValueError(
+                "If use_non_linearity is True, non_linearity must be provided."
+            )
+        self.use_non_linearity = use_non_linearity
+        self.non_linearity = non_linearity()
+        self.final_non_linearity = final_non_linearity
+
+        self.force_shifts = nn.Parameter(
+            torch.zeros(
+                3, dtype=torch.get_default_dtype(), device=self.device
+            ),
+            requires_grad=True,
+        )
+        self.force_scales = nn.Parameter(
+            torch.ones(3, dtype=torch.get_default_dtype(), device=self.device),
+            requires_grad=True,
+        )
+        self.I = torch.eye(3, device=self.device).unsqueeze(0)
+
+    def reset_parameters(self):
+        # JAX init (lecun normal)
+        for m in self.layers:
+            if isinstance(m, torch.nn.Linear):
+                std = 1.0 / (m.in_features**0.5)
+                torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+                if m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
+        # Final layer
+        m = self.final_layer
+        if isinstance(m, torch.nn.Linear):
+            std = 1.0 / (m.in_features**0.5)
+            torch.nn.init.normal_(m.weight, mean=0.0, std=std)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
+
+    def _torque_correction(
+        self,
+        forces: torch.Tensor,
+        positions: torch.Tensor,
+        data: Dict[str, torch.Tensor],
+    ):
+        """Applies torque correction to the predicted forces to ensure rotational invariance.
+        https://arxiv.org/abs/2410.22570
+
+        Args:
+            forces: Predicted forces, shape: (num_nodes, 3)
+            positions: Atomic positions, shape: (num_nodes, 3)
+            data: Dictionary containing batch information.
+
+        Returns:
+            Corrected forces, shape: (num_nodes, 3)
+        """
+
+        pos_mean = scatter.scatter_mean(
+            src=positions,
+            index=data["batch"],
+            dim=0,
+            dim_size=data["ptr"].shape[0] - 1,
+        )
+        r_i = positions - pos_mean[data["batch"]]
+
+        norm_pos_sq = (r_i**2).sum(dim=1)
+        s = scatter.scatter_sum(
+            src=norm_pos_sq,
+            index=data["batch"],
+            dim=0,
+            dim_size=data["ptr"].shape[0] - 1,
+        )
+
+        product_pos = torch.einsum("ni,nj->nij", r_i, r_i)
+        S = scatter.scatter_sum(
+            src=product_pos,
+            index=data["batch"],
+            dim=0,
+            dim_size=data["ptr"].shape[0] - 1,
+        )
+        net_torque = torch.cross(r_i, forces, dim=1)
+        tau_total = scatter.scatter_sum(
+            src=net_torque,
+            index=data["batch"],
+            dim=0,
+            dim_size=data["ptr"].shape[0] - 1,
+        )
+
+        matrix_to_inv = S - (s.view(-1, 1, 1) * self.I)
+
+        inv_matrix = torch.linalg.inv(matrix_to_inv)
+
+        omega = (inv_matrix @ tau_total.unsqueeze(-1)).squeeze(-1)
+        correction = torch.cross(omega[data["batch"]], r_i, dim=1)
+
+        corrected_forces = forces - correction
+        return corrected_forces
+
+    def _net_force_correction(
+        self,
+        forces: torch.Tensor,
+        data: Dict[str, torch.Tensor],
+    ):
+        """Removes net force from the predicted forces to ensure translational invariance.
+        https://arxiv.org/abs/2410.22570
+
+        Args:
+            forces: Predicted forces, shape: (num_nodes, 3)
+            data: Dictionary containing batch information.
+        Returns:
+            Corrected forces, shape: (num_nodes, 3)
+        """
+        mean_force = scatter.scatter_mean(
+            src=forces,
+            index=data["batch"],
+            dim=0,
+            dim_size=data["ptr"].shape[0] - 1,
+        )
+        corrected_forces = forces - mean_force[data["batch"]]
+        return corrected_forces
+
+    def forward(
+        self,
+        inv_features: torch.Tensor,
+        positions: torch.Tensor,
+        data: Dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        for layer in self.layers:
+            inv_features = layer(inv_features)
+            if self.use_non_linearity:
+                inv_features = self.non_linearity(inv_features)
+
+        forces = self.final_layer(inv_features)
+        if self.final_non_linearity:
+            forces = self.non_linearity(forces)
+
+        forces = forces * self.force_scales.unsqueeze(
+            0
+        ) + self.force_shifts.unsqueeze(0)
+
+        forces = self._net_force_correction(forces, data)
+        forces = self._torque_correction(forces, positions, data)
+
+        return forces
