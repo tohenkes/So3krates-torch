@@ -7,6 +7,7 @@ from mace import data as mace_data
 from pathlib import Path
 import os
 
+
 def run_evaluation(
     model_path: str,
     data_path: str,
@@ -122,6 +123,7 @@ def run_evaluation(
 
     return result, len(models) > 1
 
+
 def main():
 
     argparser = argparse.ArgumentParser()
@@ -173,10 +175,16 @@ def main():
         "--charges_key", type=str, help="Charges key", default="REF_charges"
     )
     argparser.add_argument(
-        "--total_charge_key", type=str, help="Total charge key", default="charge"
+        "--total_charge_key",
+        type=str,
+        help="Total charge key",
+        default="charge",
     )
     argparser.add_argument(
-        "--total_spin_key", type=str, help="Total spin key", default="total_spin"
+        "--total_spin_key",
+        type=str,
+        help="Total spin key",
+        default="total_spin",
     )
     argparser.add_argument(
         "--hirshfeld_key",
@@ -187,9 +195,7 @@ def main():
     argparser.add_argument(
         "--head_key", type=str, help="Head key", default="head"
     )
-    argparser.add_argument(
-        "--head", type=str, help="Head key", default="head"
-    )
+    argparser.add_argument("--head", type=str, help="Head key", default="head")
     argparser.add_argument("--dtype", type=str, default="float32")
     argparser.add_argument("--return_att", action="store_true")
     args = argparser.parse_args()
@@ -223,7 +229,7 @@ def main():
     head_key = args.head_key
     dtype = args.dtype
     return_att = args.return_att
-    
+
     result, is_ensemble = run_evaluation(
         model_path=model_path,
         data_path=data_path,
@@ -254,8 +260,11 @@ def main():
     extension = os.path.splitext(output_file)[1].lower()
     if extension == ".h5" or extension == ".hdf5" or extension == "":
         save_results_hdf5(result, output_file, is_ensemble=is_ensemble)
-    elif is_ensemble==False and extension == ".xyz":
+    elif is_ensemble == False and extension == ".xyz":
         from so3krates_torch.tools.utils import save_results_xyz
+
         save_results_xyz(data_path, result, output_file)
     else:
-        raise ValueError(f"Unsupported output file format: {extension} or ensemble results cannot be saved in .xyz")
+        raise ValueError(
+            f"Unsupported output file format: {extension} or ensemble results cannot be saved in .xyz"
+        )

@@ -35,7 +35,7 @@ def get_neighborhood(
     # Extend cell in non-periodic directions
     # For models with more than 5 layers, the multiplicative constant needs to be increased.
     # temp_cell = np.copy(cell)
-    #temp_cutoff = cutoff if cutoff_lr is None else cutoff_lr
+    # temp_cutoff = cutoff if cutoff_lr is None else cutoff_lr
     if not pbc_x:
         cell[0, :] = max_positions * 5 * cutoff * identity[0, :]
     if not pbc_y:
@@ -79,7 +79,7 @@ def get_neighborhood(
             cell[1, :] = max_positions * 2 * cutoff_lr * identity[1, :]
         if not pbc_z:
             cell[2, :] = max_positions * 2 * cutoff_lr * identity[2, :]
-            
+
         sender_lr, receiver_lr, unit_shifts_lr = neighbour_list(
             quantities="ijS",
             pbc=pbc,

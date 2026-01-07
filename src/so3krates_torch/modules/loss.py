@@ -46,7 +46,9 @@ class WeightedEnergyForcesLoss(torch.nn.Module):
     ) -> torch.Tensor:
         loss_energy = weighted_mean_squared_error_energy(ref, pred, ddp)
         loss_forces = mean_squared_error_forces(ref, pred, ddp)
-        return self.energy_weight * loss_energy + self.forces_weight * loss_forces
+        return (
+            self.energy_weight * loss_energy + self.forces_weight * loss_forces
+        )
 
     def __repr__(self):
         return (

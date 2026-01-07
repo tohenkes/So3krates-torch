@@ -236,9 +236,7 @@ class TorchkratesCalculator(Calculator):
                     config,
                     z_table=self.z_table,
                     cutoff=self.r_max,
-                    cutoff_lr=(
-                        self.r_max_lr
-                    ),
+                    cutoff_lr=(self.r_max_lr),
                 )
             ],
             batch_size=batch_size,
@@ -293,12 +291,12 @@ class TorchkratesCalculator(Calculator):
                 if out["hirshfeld_ratios"] is not None:
                     ret_tensors["hirshfeld_ratios"][i] = out[
                         "hirshfeld_ratios"
-                ].detach()
+                    ].detach()
         self._process_results(
             ret_tensors=ret_tensors,
             out=out,
             multi_output=self.num_models > 1,
-            )
+        )
 
     def get_hessian(self, atoms=None):
         if atoms is None and self.atoms is None:
@@ -345,10 +343,7 @@ class TorchkratesCalculator(Calculator):
             }
 
     def _process_results(
-        self,
-        ret_tensors: dict,
-        out: dict,
-        multi_output: bool = False
+        self, ret_tensors: dict, out: dict, multi_output: bool = False
     ):
         self.results = {}
         if self.model_type in ["so3lr", "so3krates"]:
@@ -509,9 +504,11 @@ class MultiHeadSO3LRCalculator(TorchkratesCalculator):
         )
         self.num_heads = self.models[0].num_heads
         self.models[0].select_heads = False
-        
-        assert self.num_models == 1, "MultiHeadSO3LRCalculator expects a single multi-head model."
-    
+
+        assert (
+            self.num_models == 1
+        ), "MultiHeadSO3LRCalculator expects a single multi-head model."
+
     def calculate(
         self, atoms=None, properties=None, system_changes=all_changes
     ):
@@ -551,7 +548,7 @@ class MultiHeadSO3LRCalculator(TorchkratesCalculator):
             if out["hirshfeld_ratios"] is not None:
                 ret_tensors["hirshfeld_ratios"] = out[
                     "hirshfeld_ratios"
-            ].detach()
+                ].detach()
 
         self._process_results(ret_tensors, out, multi_output=True)
 
@@ -561,9 +558,7 @@ class MultiHeadSO3LRCalculator(TorchkratesCalculator):
         dict_of_tensors = {}
         if model_type in ["so3lr", "so3krates"]:
             energies = torch.zeros(num_heads, device=self.device)
-            node_energy = torch.zeros(
-                num_heads, num_atoms, device=self.device
-            )
+            node_energy = torch.zeros(num_heads, num_atoms, device=self.device)
             forces = torch.zeros(num_heads, num_atoms, 3, device=self.device)
             stress = torch.zeros(num_heads, 3, 3, device=self.device)
             dict_of_tensors.update(
@@ -576,12 +571,8 @@ class MultiHeadSO3LRCalculator(TorchkratesCalculator):
             )
         if model_type in ["so3lr"]:
             dipole = torch.zeros(3, device=self.device)
-            partial_charges = torch.zeros(
-                num_atoms, device=self.device
-            )
-            hirshfeld_ratios = torch.zeros(
-                num_atoms, device=self.device
-            )
+            partial_charges = torch.zeros(num_atoms, device=self.device)
+            hirshfeld_ratios = torch.zeros(num_atoms, device=self.device)
             dict_of_tensors.update(
                 {
                     "dipole": dipole,
@@ -590,8 +581,8 @@ class MultiHeadSO3LRCalculator(TorchkratesCalculator):
                 }
             )
         return dict_of_tensors
-    
-    def get_hessian(
-        self, atoms=None
-    ):
-        raise NotImplementedError("Hessian calculation is not implemented for Multi-Head SO3LR models.")
+
+    def get_hessian(self, atoms=None):
+        raise NotImplementedError(
+            "Hessian calculation is not implemented for Multi-Head SO3LR models."
+        )

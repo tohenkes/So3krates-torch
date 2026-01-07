@@ -81,10 +81,16 @@ def main():
         "--charges_key", type=str, help="Charges key", default="REF_charges"
     )
     parser.add_argument(
-        "--total_charge_key", type=str, help="Total charge key", default="charge"
+        "--total_charge_key",
+        type=str,
+        help="Total charge key",
+        default="charge",
     )
     parser.add_argument(
-        "--total_spin_key", type=str, help="Total spin key", default="total_spin"
+        "--total_spin_key",
+        type=str,
+        help="Total spin key",
+        default="total_spin",
     )
     parser.add_argument(
         "--hirshfeld_key",
@@ -96,7 +102,9 @@ def main():
         "--multihead_model", action="store_true", help="Multihead model"
     )
     parser.add_argument(
-        "--multihead_return_mean", action="store_true", help="Multihead return mean"
+        "--multihead_return_mean",
+        action="store_true",
+        help="Multihead return mean",
     )
     parser.add_argument(
         "--head_key", type=str, help="Head key", default="head"

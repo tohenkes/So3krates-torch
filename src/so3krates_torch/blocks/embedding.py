@@ -22,14 +22,13 @@ class InvariantEmbedding(torch.nn.Module):
 
     def reset_parameters(self):
         # JAX init for embedding
-        std = 1.0 / (self.embedding.out_features ** 0.5)
+        std = 1.0 / (self.embedding.out_features**0.5)
         torch.nn.init.normal_(self.embedding.weight, mean=0.0, std=std)
         if self.embedding.bias is not None:
             torch.nn.init.zeros_(self.embedding.bias)
-    
+
     def forward(self, one_hot: torch.Tensor) -> torch.Tensor:
         return self.embedding(one_hot)
-
 
 
 class EuclideanEmbedding(torch.nn.Module):
@@ -97,14 +96,14 @@ class ChargeSpinEmbedding(torch.nn.Module):
             out_features=num_features,
             bias=False,
         )
-        
+
         # JAX init for Wq
-        std = 1.0 / (self.Wq.out_features ** 0.5)
+        std = 1.0 / (self.Wq.out_features**0.5)
         torch.nn.init.normal_(self.Wq.weight, mean=0.0, std=std)
-        
+
         self.Wk = torch.nn.Parameter(torch.empty(size=(2, num_features)))
         self.Wv = torch.nn.Parameter(torch.empty(size=(2, num_features)))
-        
+
         # JAX init for Wk and Wv
         std = 1.0 / (self.Wk.size(1) ** 0.5)
         torch.nn.init.normal_(self.Wk, mean=0.0, std=std)
@@ -118,11 +117,11 @@ class ChargeSpinEmbedding(torch.nn.Module):
             self.activation_fn(),
             torch.nn.Linear(num_features, num_features, bias=False),
         )
-        
+
         # JAX init for MLP
         for m in self.mlp:
             if isinstance(m, torch.nn.Linear):
-                std = 1.0 / (m.in_features ** 0.5)
+                std = 1.0 / (m.in_features**0.5)
                 torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)

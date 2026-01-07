@@ -286,7 +286,7 @@ class So3krates(torch.nn.Module):
 
         ######### EMBEDDING #########
         inv_features = self.inv_feature_embedding(data["node_attrs"])
-        
+
         if self.use_charge_embed:
             inv_features += self.charge_embedding(
                 elements_one_hot=data["node_attrs"],
@@ -477,12 +477,12 @@ class SO3LR(So3krates):
 
         # Short-range repulsion
         self.zbl_repulsion = ZBLRepulsion()
-        
+
         # i'm sorry for this. but in the jax version they always initiate
         # the long range modules even though the booleans are set to false.
         # if didn't do this there would be problems when converting models
         # to jax back and forth ... its ugly and wasteful, i know.
-        
+
         # Electrostatics
         if self.electrostatic_energy_bool:
             self.use_lr = True
@@ -507,6 +507,7 @@ class SO3LR(So3krates):
         self.dispersion_potential = DispersionInteraction(
             neighborlist_format_lr=self.neighborlist_format_lr
         )
+
     def _get_graph(
         self,
         data: Dict[str, torch.Tensor],
@@ -646,9 +647,7 @@ class SO3LR(So3krates):
             data,
             atomic_numbers=data["atomic_numbers"],
         )
-        
 
-        
         if self.use_lr:
             self.receivers_lr, self.senders_lr = (
                 data["edge_index_lr"][0],
@@ -840,8 +839,8 @@ class MultiHeadSO3LR(SO3LR):
     def _select_heads(
         self,
         output_dict: dict,
-        ) -> dict:
-        
+    ) -> dict:
+
         row_indices = torch.arange(
             output_dict["energy"].shape[1],
             device=self.device,
@@ -859,7 +858,7 @@ class MultiHeadSO3LR(SO3LR):
         output_dict["forces"] = output_dict["forces"][
             head_index_repeated, full_node_index
         ]
-        
+
         if output_dict["stress"] is not None:
             output_dict["stress"] = output_dict["stress"][
                 self.head_idxs, row_indices
@@ -868,7 +867,7 @@ class MultiHeadSO3LR(SO3LR):
             output_dict["virials"] = output_dict["virials"][
                 self.head_idxs, row_indices
             ]
-        
+
         return output_dict
 
     def _create_output_dict(
@@ -888,7 +887,6 @@ class MultiHeadSO3LR(SO3LR):
         training: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
 
-        
         # total_energy has shape (num_graphs, num_output_heads)
         # permute to shape (num_output_heads, num_graphs)
         total_energy = total_energy.permute(1, 0)
@@ -907,11 +905,11 @@ class MultiHeadSO3LR(SO3LR):
             "att_scores": att_scores,
         }
         if self.select_heads:
-            assert not self.return_mean, (
-                "Cannot both select heads and return mean."
-            )
+            assert (
+                not self.return_mean
+            ), "Cannot both select heads and return mean."
             output_dict = self._select_heads(output_dict)
-            
+
         if self.return_mean:
             mean_properties = [
                 "energy",
@@ -924,5 +922,5 @@ class MultiHeadSO3LR(SO3LR):
             for k, v in output_dict.items():
                 if v is not None and k in mean_properties:
                     output_dict[k] = v.mean(dim=0)
-            
+
         return output_dict

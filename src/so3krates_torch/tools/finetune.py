@@ -13,17 +13,18 @@ import math
 import logging
 
 POSSIBLE_FINETUNING_CHOICES = [
-        "naive",
-        "last_layer",
-        "mlp",
-        "qkv",
-        "lora",
-        "dora",
-        "vera",
-        "last_layer+mlp",
-        "qkv+mlp",
-        "lora+mlp",
+    "naive",
+    "last_layer",
+    "mlp",
+    "qkv",
+    "lora",
+    "dora",
+    "vera",
+    "last_layer+mlp",
+    "qkv+mlp",
+    "lora+mlp",
 ]
+
 
 @contextmanager
 def preserve_grad_state(model):
@@ -219,7 +220,7 @@ def freeze_model_parameters(
         "qkv+mlp",
         "mlp",
         "lora+mlp",
-        "last_layer"
+        "last_layer",
     ]:
         keep_trainable.append("atomic_energy_output_block.layers")
         keep_trainable.append("atomic_energy_output_block.final_layer")
@@ -321,7 +322,7 @@ def freeze_model_parameters(
     # First, freeze all parameters
     for param in model.parameters():
         param.requires_grad = False
-        
+
     # Then unfreeze only the specified ones
     for name, param in model.named_parameters():
         for keep_key in keep_trainable:
@@ -351,26 +352,30 @@ def setup_finetuning(
     seed: int = 42,
     log: bool = False,
 ) -> torch.nn.Module:
-    #TODO: docstring etc
-    assert finetune_choice in POSSIBLE_FINETUNING_CHOICES, (
-        f"Invalid finetuning choice '{finetune_choice}'. Must be one of {POSSIBLE_FINETUNING_CHOICES}."
-    )
-    
+    # TODO: docstring etc
+    assert (
+        finetune_choice in POSSIBLE_FINETUNING_CHOICES
+    ), f"Invalid finetuning choice '{finetune_choice}'. Must be one of {POSSIBLE_FINETUNING_CHOICES}."
+
     # unfreeze all parameters in case loaded model has frozen params
     for param in model.parameters():
         param.requires_grad = True
-        
+
     if log:
         logging.info(f"Setting up finetuning with choice: {finetune_choice}")
-    
+
     if convert_to_multihead:
-        assert architecture_settings is not None, (
-            "architecture_settings must be provided when convert_to_multihead is True"
+        assert (
+            architecture_settings is not None
+        ), "architecture_settings must be provided when convert_to_multihead is True"
+        model = pretrained_to_mh_model(
+            architecture_settings, model, device_name
         )
-        model = pretrained_to_mh_model(architecture_settings, model, device_name)
-        
+
     if (
-        finetune_choice == "lora" or finetune_choice == "lora+mlp" and convert_to_lora
+        finetune_choice == "lora"
+        or finetune_choice == "lora+mlp"
+        and convert_to_lora
     ):
         lora_alpha = 2.0 * lora_rank if lora_alpha is None else lora_alpha
         model = model_to_lora(
@@ -391,7 +396,7 @@ def setup_finetuning(
             alpha=lora_alpha,
             use_dora=True,
             device=device_name,
-            scaling_to_one=dora_scaling_to_one
+            scaling_to_one=dora_scaling_to_one,
         )
         logging.info("Converted model to DoRA format")
 
@@ -402,7 +407,7 @@ def setup_finetuning(
             alpha=lora_alpha,
             use_vera=True,
             device=device_name,
-            scaling_to_one=dora_scaling_to_one
+            scaling_to_one=dora_scaling_to_one,
         )
         if log:
             logging.info("Converted model to VeRA format")
@@ -419,17 +424,14 @@ def setup_finetuning(
             freeze_hirshfeld=freeze_hirshfeld,
             freeze_partial_charges=freeze_partial_charges,
         )
-            
+
     if log:
-        assert num_elements is not None, (
-            "num_elements must be provided for parameter reporting"
-        )
+        assert (
+            num_elements is not None
+        ), "num_elements must be provided for parameter reporting"
         use_electrostatics = model.electrostatic_energy_bool
         use_dispersion = model.dispersion_energy_bool
         report_count_params(
-            model, 
-            num_elements,
-            use_electrostatics, 
-            use_dispersion
+            model, num_elements, use_electrostatics, use_dispersion
         )
     return model

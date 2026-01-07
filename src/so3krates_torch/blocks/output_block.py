@@ -49,14 +49,18 @@ class AtomicEnergyOutputHead(nn.Module):
 
         self.energy_shifts = nn.Parameter(
             torch.zeros(
-                num_elements, dtype=torch.get_default_dtype(),
-                device=self.device
+                num_elements,
+                dtype=torch.get_default_dtype(),
+                device=self.device,
             ),
             requires_grad=False,
         )
         self.energy_scales = nn.Linear(
-            num_elements,1, bias=False, dtype=torch.get_default_dtype(),
-            device=self.device
+            num_elements,
+            1,
+            bias=False,
+            dtype=torch.get_default_dtype(),
+            device=self.device,
         )
         nn.init.ones_(self.energy_scales.weight)
         self.energy_scales.weight.requires_grad = False
@@ -88,13 +92,14 @@ class AtomicEnergyOutputHead(nn.Module):
                 atomic_type_shifts=atomic_type_shifts
             )
 
-
         self.enable_learned_energy_shifts_and_scales()
-        
+
     def set_defined_energy_shifts(
-            self,
-            atomic_type_shifts: Union[Dict[str, float], torch.Tensor, nn.Parameter]
-            ):
+        self,
+        atomic_type_shifts: Union[
+            Dict[str, float], torch.Tensor, nn.Parameter
+        ],
+    ):
         if isinstance(atomic_type_shifts, dict):
             self.energy_shifts = nn.Parameter(
                 torch.tensor(
@@ -104,23 +109,22 @@ class AtomicEnergyOutputHead(nn.Module):
                     device=self.device,
                 )
             )
-        elif isinstance(atomic_type_shifts, torch.Tensor) or isinstance(atomic_type_shifts, nn.Parameter):
-            
+        elif isinstance(atomic_type_shifts, torch.Tensor) or isinstance(
+            atomic_type_shifts, nn.Parameter
+        ):
+
             atomic_type_shifts.to(self.device)
             atomic_type_shifts.requires_grad = False
-            
+
             self.energy_shifts = nn.Parameter(
-                atomic_type_shifts.to(
-                    dtype=torch.get_default_dtype()
-                )
+                atomic_type_shifts.to(dtype=torch.get_default_dtype())
             )
         else:
             raise ValueError(
                 "atomic_type_shifts must be either a dict, torch.Tensor, or nn.Parameter."
             )
         self.enable_learned_energy_shifts_and_scales()
-        
-        
+
     def enable_learned_energy_shifts_and_scales(self):
         if self.energy_learn_atomic_type_shifts:
             self.energy_shifts.requires_grad = True
@@ -131,14 +135,14 @@ class AtomicEnergyOutputHead(nn.Module):
         # JAX init (lecun normal)
         for m in self.layers:
             if isinstance(m, torch.nn.Linear):
-                std = 1.0 / (m.in_features ** 0.5)
+                std = 1.0 / (m.in_features**0.5)
                 torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
         # Final layer
         m = self.final_layer
         if isinstance(m, torch.nn.Linear):
-            std = 1.0 / (m.in_features ** 0.5)
+            std = 1.0 / (m.in_features**0.5)
             torch.nn.init.normal_(m.weight, mean=0.0, std=std)
             if m.bias is not None:
                 torch.nn.init.zeros_(m.bias)
@@ -157,12 +161,11 @@ class AtomicEnergyOutputHead(nn.Module):
         atomic_energies = self.final_layer(inv_features)
         if self.final_non_linearity:
             atomic_energies = self.non_linearity(inv_features)
-            
+
         one_hot = data["node_attrs"]
         atomic_number_idx = torch.argmax(one_hot, dim=1)
         atomic_energies *= self.energy_scales(data["node_attrs"])
         atomic_energies += self.energy_shifts[atomic_number_idx].unsqueeze(1)
-
 
         return atomic_energies
 
@@ -222,12 +225,12 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                     device=device,
                 )
             )
-            
+
             # JAX init (lecun normal)
             std = 1.0 / (multi_head_weights.size(1) ** 0.5)
             torch.nn.init.normal_(multi_head_weights, mean=0.0, std=std)
             torch.nn.init.zeros_(multi_head_bias)
-            
+
             self.layers_weights.append(multi_head_weights)
             self.layers_bias.append(multi_head_bias)
 
@@ -248,12 +251,12 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                 device=device,
             )
         )
-        
+
         # JAX init (lecun normal)
         std = 1.0 / (multi_head_final_weights.size(1) ** 0.5)
         torch.nn.init.normal_(multi_head_final_weights, mean=0.0, std=std)
         torch.nn.init.zeros_(multi_head_final_bias)
-        
+
         self.final_layer_weights = multi_head_final_weights
         self.final_layer_bias = multi_head_final_bias
 
@@ -261,21 +264,19 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
         # Initialize energy_shifts for all heads with zeros (or defined shifts)
         self.energy_shifts = nn.Parameter(
             torch.zeros(
-                num_elements, dtype=torch.get_default_dtype(),
-                device=device
+                num_elements, dtype=torch.get_default_dtype(), device=device
             ),
             requires_grad=False,
         )
-        
+
         # Initialize energy_scales for all heads
         self.energy_scales = nn.Parameter(
             torch.ones(
-                num_elements, 1, dtype=torch.get_default_dtype(),
-                device=device
+                num_elements, 1, dtype=torch.get_default_dtype(), device=device
             ),
             requires_grad=False,
         )
-        
+
         # Handle defined atomic type shifts (same for all heads)
         if atomic_type_shifts is not None:
             # Remove element zero if present
@@ -296,7 +297,7 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
                 ),
                 requires_grad=False,
             )
-        
+
         # Enable gradient if requested
         self.enable_learned_energy_shifts_and_scales()
 
@@ -331,10 +332,8 @@ class MultiAtomicEnergyOutputHead(AtomicEnergyOutputHead):
         if self.final_non_linearity:
             atomic_energies = self.non_linearity(atomic_energies)
 
-
         one_hot = data["node_attrs"]
         atomic_number_idx = torch.argmax(one_hot, dim=1)
-
 
         one_hot = data["node_attrs"]
         scales = torch.matmul(one_hot, self.energy_scales)
@@ -375,20 +374,20 @@ class PartialChargesOutputHead(nn.Module):
 
     def reset_parameters(self):
         # JAX init (lecun normal) - embedding
-        std = 1.0 / (self.atomic_embedding.embedding_dim ** 0.5)
+        std = 1.0 / (self.atomic_embedding.embedding_dim**0.5)
         torch.nn.init.normal_(self.atomic_embedding.weight, mean=0.0, std=std)
         # JAX init (lecun normal) - linear layers
         if isinstance(self.transform_inv_features, nn.Sequential):
             for m in self.transform_inv_features:
                 if isinstance(m, torch.nn.Linear):
-                    std = 1.0 / (m.in_features ** 0.5)
+                    std = 1.0 / (m.in_features**0.5)
                     torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                     if m.bias is not None:
                         torch.nn.init.zeros_(m.bias)
         else:
             m = self.transform_inv_features
             if isinstance(m, torch.nn.Linear):
-                std = 1.0 / (m.in_features ** 0.5)
+                std = 1.0 / (m.in_features**0.5)
                 torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
@@ -485,22 +484,22 @@ class HirshfeldOutputHead(nn.Module):
 
     def reset_parameters(self):
         # JAX init (lecun normal) - embeddings
-        std = 1.0 / (self.v_shift_embedding.embedding_dim ** 0.5)
+        std = 1.0 / (self.v_shift_embedding.embedding_dim**0.5)
         torch.nn.init.normal_(self.v_shift_embedding.weight, mean=0.0, std=std)
-        std = 1.0 / (self.q_embedding.embedding_dim ** 0.5)
+        std = 1.0 / (self.q_embedding.embedding_dim**0.5)
         torch.nn.init.normal_(self.q_embedding.weight, mean=0.0, std=std)
         # JAX init (lecun normal) - linear layers
         if isinstance(self.transform_features, nn.Sequential):
             for m in self.transform_features:
                 if isinstance(m, torch.nn.Linear):
-                    std = 1.0 / (m.in_features ** 0.5)
+                    std = 1.0 / (m.in_features**0.5)
                     torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                     if m.bias is not None:
                         torch.nn.init.zeros_(m.bias)
         else:
             m = self.transform_features
             if isinstance(m, torch.nn.Linear):
-                std = 1.0 / (m.in_features ** 0.5)
+                std = 1.0 / (m.in_features**0.5)
                 torch.nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
@@ -545,5 +544,6 @@ class HirshfeldOutputHead(nn.Module):
 
 class DirectForceOutputHead(nn.Module):
     def __init__(self, num_features: int):
-        raise NotImplementedError("DirectForceOutputHead is not implemented yet.")
-
+        raise NotImplementedError(
+            "DirectForceOutputHead is not implemented yet."
+        )

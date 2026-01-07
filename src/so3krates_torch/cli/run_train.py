@@ -26,12 +26,8 @@ from mace.tools.utils import MetricsLogger, setup_logger, AtomicNumberTable
 from mace.tools.checkpoint import CheckpointHandler, CheckpointState
 from torch_ema import ExponentialMovingAverage
 from so3krates_torch.tools.train import train
-from so3krates_torch.tools.finetune import (
-    fuse_lora_weights,
-    setup_finetuning
-)
+from so3krates_torch.tools.finetune import fuse_lora_weights, setup_finetuning
 import os
-
 
 
 DTYPE_MAP = {
@@ -40,6 +36,7 @@ DTYPE_MAP = {
     "float16": torch.float16,
     "bfloat16": torch.bfloat16,
 }
+
 
 def setup_config_from_yaml(config_path: str) -> dict:
     """Load and parse configuration from YAML file."""
@@ -177,7 +174,7 @@ def setup_data_loaders(config: dict) -> tuple:
         info_keys={
             "energy": "REF_energy",
             "dipole": "REF_dipole",
-            "total_charge": "charge"
+            "total_charge": "charge",
         },
         arrays_keys={
             "hirshfeld_ratios": "REF_hirsh_ratios",
@@ -237,15 +234,15 @@ def setup_data_loaders(config: dict) -> tuple:
 
         average_atomic_energy_shifts = compute_average_E0s(
             collections_train=train_configs,
-            z_table= AtomicNumberTable([int(z) for z in range(1, 119)])
+            z_table=AtomicNumberTable([int(z) for z in range(1, 119)]),
         )
         train_data = create_data_from_configs(
             train_configs,
             r_max=r_max,
             r_max_lr=r_max_lr,
             all_heads=list(heads.keys()),
-        )        
-        
+        )
+
         train_loader = create_dataloader_from_data(
             config_list=train_data,
             batch_size=batch_size,
@@ -263,9 +260,8 @@ def setup_data_loaders(config: dict) -> tuple:
             val_data,
             avg_num_neighbors,
             num_elements,
-            average_atomic_energy_shifts
+            average_atomic_energy_shifts,
         )
-
 
     else:
         # Load data
@@ -297,20 +293,20 @@ def setup_data_loaders(config: dict) -> tuple:
 
         average_atomic_energy_shifts = compute_average_E0s(
             collections_train=train_configs,
-            z_table= AtomicNumberTable([int(z) for z in range(1, 119)])
+            z_table=AtomicNumberTable([int(z) for z in range(1, 119)]),
         )
         train_atomic_data = create_data_from_configs(
             train_configs,
             r_max=r_max,
             r_max_lr=r_max_lr,
         )
-        
+
         train_loader = create_dataloader_from_data(
             config_list=train_atomic_data,
             batch_size=batch_size,
             shuffle=True,
         )
-        
+
         num_elements = determine_num_elements(train_loader)
         avg_num_neighbors = compute_avg_num_neighbors(train_loader)
 
@@ -332,7 +328,7 @@ def setup_data_loaders(config: dict) -> tuple:
             {"main": valid_loader},
             avg_num_neighbors,
             num_elements,
-            average_atomic_energy_shifts
+            average_atomic_energy_shifts,
         )
 
 
@@ -349,13 +345,13 @@ def set_avg_num_neighbors_in_model(
 
 def set_atomic_energy_shifts_in_model(
     model: Union[SO3LR, MultiHeadSO3LR],
-    atomic_energy_shifts: Union[dict, torch.tensor, nn.Parameter]
+    atomic_energy_shifts: Union[dict, torch.tensor, nn.Parameter],
 ) -> None:
     model.atomic_energy_output_block.set_defined_energy_shifts(
         atomic_energy_shifts
     )
-        
-        
+
+
 def process_config_atomic_energies(
     atomic_shifts_config: dict,
 ):
@@ -369,7 +365,7 @@ def process_config_atomic_energies(
             atomic_energy_shifts[z] = 0.0
     return atomic_energy_shifts
 
-   
+
 def determine_num_elements(data_loader: torch.utils.data.DataLoader) -> int:
     """Determine the number of unique elements in the dataset."""
     unique_elements = set()
@@ -770,29 +766,20 @@ def handle_finetuning(
     num_elements: int,
     device_name: str,
 ) -> None:
-    
-    
+
     return setup_finetuning(
         model=model,
         finetune_choice=config["TRAINING"].get("finetune_choice", None),
         device_name=device_name,
         num_elements=num_elements,
-        freeze_embedding=config["TRAINING"].get(
-            "freeze_embedding", True
-        ),
+        freeze_embedding=config["TRAINING"].get("freeze_embedding", True),
         freeze_zbl=config["TRAINING"].get("freeze_zbl", True),
-        freeze_hirshfeld=config["TRAINING"].get(
-            "freeze_hirshfeld", True
-        ),
+        freeze_hirshfeld=config["TRAINING"].get("freeze_hirshfeld", True),
         freeze_partial_charges=config["TRAINING"].get(
             "freeze_partial_charges", True
         ),
-        freeze_shifts=config["TRAINING"].get(
-            "freeze_shifts", False
-        ),
-        freeze_scales=config["TRAINING"].get(
-            "freeze_scales", False
-        ),
+        freeze_shifts=config["TRAINING"].get("freeze_shifts", False),
+        freeze_scales=config["TRAINING"].get("freeze_scales", False),
         lora_rank=config["TRAINING"].get("lora_rank", 4),
         lora_alpha=config["TRAINING"].get("lora_alpha", 8.0),
         lora_freeze_A=config["TRAINING"].get("lora_freeze_A", False),
@@ -804,7 +791,7 @@ def handle_finetuning(
         ),
         architecture_settings=config["ARCHITECTURE"],
         seed=config["GENERAL"].get("seed", 42),
-        log=True
+        log=True,
     )
 
 
@@ -835,7 +822,7 @@ def run_training(config: dict) -> None:
 
     dtype_str = config["GENERAL"].get("default_dtype", "float32")
     torch.set_default_dtype(DTYPE_MAP[dtype_str])
-    
+
     # Get pretrained model settings from config
     pretrained_weights = config["TRAINING"].get("pretrained_weights", None)
     pretrained_model = config["TRAINING"].get("pretrained_model", None)
@@ -864,9 +851,7 @@ def run_training(config: dict) -> None:
     if pretrained_model:
         # Load complete pretrained model (ignores config architecture)
         model = load_pretrained_model_direct(pretrained_model, device)
-        logging.info(
-            "Using complete pretrained model."
-        )
+        logging.info("Using complete pretrained model.")
         warm_start = True
     else:
         # Create model from config
@@ -891,7 +876,6 @@ def run_training(config: dict) -> None:
         average_atomic_energy_shifts,
     ) = setup_data_loaders(config)
 
-
     if warm_start:
         if config["TRAINING"].get("ft_update_avg_num_neighbors", False):
             logging.info(
@@ -914,32 +898,30 @@ def run_training(config: dict) -> None:
             )
     else:
         model.avg_num_neighbors = avg_num_neighbors
-        atomic_shifts_config = config['ARCHITECTURE'].get('atomic_energy_shifts', None)
+        atomic_shifts_config = config["ARCHITECTURE"].get(
+            "atomic_energy_shifts", None
+        )
         # sort the shifts by atomic number and add all remaining elements as 0
         if atomic_shifts_config is not None:
             atomic_energy_shifts = process_config_atomic_energies(
                 atomic_shifts_config
             )
-            logging.info(
-                "Using provided atomic energy shifts for training."
-            )
-            
+            logging.info("Using provided atomic energy shifts for training.")
+
         else:
             atomic_energy_shifts = average_atomic_energy_shifts
             logging.info(
                 "Using average atomic energy shifts computed from training data for training."
             )
-         
+
     # Setup finetuning if specified
     if config["TRAINING"].get("finetune_choice", None):
         model = handle_finetuning(config, model, num_elements, device_name)
-       
+
     logging.info(f"Atomic energy shifts: {atomic_energy_shifts}")
-    set_atomic_energy_shifts_in_model(
-        model, atomic_energy_shifts
-    )
+    set_atomic_energy_shifts_in_model(model, atomic_energy_shifts)
     set_avg_num_neighbors_in_model(model, avg_num_neighbors)
-    
+
     set_dtype_model(model, config["GENERAL"].get("default_dtype", "float32"))
 
     # Setup loss function
