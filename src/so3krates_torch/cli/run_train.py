@@ -867,6 +867,11 @@ def run_training(config: dict) -> None:
         f"r_max ({config['ARCHITECTURE'].get('r_max', 4.5)})"
     )
 
+    assert model.r__max_lr == config["ARCHITECTURE"].get("r_max_lr", None), (
+        f"Model r_max_lr ({model.r__max_lr}) does not match config "
+        f"r_max_lr ({config['ARCHITECTURE'].get('r_max_lr', None)})"
+    )
+
     # Setup data loaders
     (
         train_loader,
