@@ -4,18 +4,17 @@ GENERAL:
   model_dir: ./model
   log_dir: ./logs
   default_dtype: float64
-  compute_stress: False
   seed: 100
 
 ARCHITECTURE:
   activation_fn: silu
-  r_max: 4.5
-  cutoff_lr: null
+  r_max: 6.
+  r_max_lr: 12.0
   cutoff_fn: phys
-  degrees: [1, 2, 3, 4]
+  degrees: [1,2,3,4]
   dispersion_energy_bool: true
   dispersion_energy_scale: 1.2
-  dispersion_energy_cutoff_lr_damping: 12.0  
+  dispersion_energy_cutoff_lr_damping: 2.0
   electrostatic_energy_bool: true
   electrostatic_energy_scale: 4.0
   energy_activation_fn: silu
@@ -44,34 +43,21 @@ TRAINING:
   batch_size: 5
   valid_batch_size: 5
   weight_decay: 0.
-  lr: 0.0005
+  lr: 0.001
   optimizer: adam
   amsgrad: True
   scheduler: exponential_decay 
   lr_scheduler_gamma: 0.85
-  #ema: True
-  #ema_decay: 0.99
   energy_weight: 0.
   forces_weight: 1000.
   eval_interval: 1
   num_epochs: 5
-  path_to_train_data: ./md17_ethanol_small.xyz
+  path_to_train_data: ./path/to/train/data
   valid_ratio: 0.1
   clip_grad: 10.0
   neighbors_lr_cutoff: 100.
   patience: 50
-  pretrained_model: /home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/src/so3krates_torch/pretrained/so3lr/so3lr.model
-  #pretrained_model: /home/tobias/Uni/Promotion/Research/torchkrates/So3krates-torch/src/so3krates_torch/pretrained/so3lr/so3lr.model
-  finetune_choice: dora
-  lora_rank: 4
-  lora_alpha: 8
 
 
 MISC:
   device: cpu
-  keep_checkpoints: False
-  restart_latest: True 
-  error_table: PerAtomMAE
-  log_level: INFO
-  log_wandb: False
-  no_checkpoint: False
