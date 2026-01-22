@@ -27,7 +27,7 @@ dist/
 # DS_Store
 .DS_Store
 *.models
-*.pt
+#*.pt
 /wandb
 #*.xyz
 *.extxyz

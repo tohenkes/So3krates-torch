@@ -54,7 +54,7 @@ def main():
         "--r_max_lr",
         type=float,
         help="Max radius for long-range potentials",
-        default=12.0,
+        default=None,
     )
     parser.add_argument(
         "--dispersion_energy_cutoff_lr_damping",
@@ -81,10 +81,36 @@ def main():
         "--charges_key", type=str, help="Charges key", default="REF_charges"
     )
     parser.add_argument(
+        "--total_charge_key",
+        type=str,
+        help="Total charge key",
+        default="charge",
+    )
+    parser.add_argument(
+        "--total_spin_key",
+        type=str,
+        help="Total spin key",
+        default="total_spin",
+    )
+    parser.add_argument(
         "--hirshfeld_key",
         type=str,
         help="Hirshfeld key",
         default="REF_hirsh_ratios",
+    )
+    parser.add_argument(
+        "--multihead_model", action="store_true", help="Multihead model"
+    )
+    parser.add_argument(
+        "--multihead_return_mean",
+        action="store_true",
+        help="Multihead return mean",
+    )
+    parser.add_argument(
+        "--head_key", type=str, help="Head key", default="head"
+    )
+    parser.add_argument(
+        "--head_name", type=str, help="Head name", default="head"
     )
 
     args = parser.parse_args()
@@ -102,6 +128,13 @@ def main():
             model.dispersion_energy_cutoff_lr_damping = (
                 args.dispersion_energy_cutoff_lr_damping
             )
+        if args.multihead_model and not args.multihead_return_mean:
+            model.select_heads = True
+            logging.info("Multihead model: Selecting heads.")
+        elif args.multihead_model and args.multihead_return_mean:
+            model.select_heads = False
+            model.return_mean = True
+            logging.info("Multihead model: Returning mean over heads.")
 
     possible_args = [
         "energy",
@@ -146,6 +179,11 @@ def main():
         virials_key=args.virials_key,
         dipole_key=args.dipole_key,
         charges_key=args.charges_key,
+        total_charge_key=args.total_charge_key,
+        total_spin_key=args.total_spin_key,
+        hirshfeld_key=args.hirshfeld_key,
+        head_name=args.head_name,
+        head_key=args.head_key,
         r_max_lr=args.r_max_lr,
         log=True,  # Enable logging for detailed output
     )

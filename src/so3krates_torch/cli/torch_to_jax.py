@@ -65,6 +65,11 @@ def main():
     args = argparser.parse_args()
     path_to_settings_dir = Path(args.save_settings_path)
     path_to_params_dir = Path(args.save_params_path)
+    # check if the directories exist, if not create them
+    if args.save_settings_path:
+        path_to_settings_dir.mkdir(parents=True, exist_ok=True)
+    if args.save_params_path:
+        path_to_params_dir.mkdir(parents=True, exist_ok=True)
 
     # assert that either save_settings_path or save_state_dict_path or save_model_path is provided
     assert (
@@ -74,10 +79,14 @@ def main():
 
     with open(args.path_to_hyperparams, "r") as f:
         torch_settings = yaml.safe_load(f)
-    state_dict = torch.load(args.path_to_state_dict, weights_only=True)
+    state_dict = torch.load(
+        args.path_to_state_dict,
+        weights_only=True,
+        map_location=torch.device("cpu"),
+    )
     cfg, params = convert_torch_to_flax(
         torch_state_dict=state_dict,
-        torch_settings=torch_settings,
+        torch_settings=torch_settings["ARCHITECTURE"],
         dtype=args.dtype,
     )
 

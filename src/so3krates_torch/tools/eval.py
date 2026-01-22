@@ -13,7 +13,7 @@ from mace.tools.utils import (
     compute_rel_rmse,
     compute_rmse,
 )
-from so3krates_torch.tools.utils import create_dataloader
+from so3krates_torch.tools.utils import create_dataloader_from_list
 from torchmetrics import Metric
 import time
 
@@ -26,6 +26,7 @@ def evaluate_model(
     model_type: str,
     r_max_lr: float = 12.0,
     multi_species: bool = False,
+    multihead_model: bool = False,
     dispersion_energy_cutoff_lr_damping: Optional[float] = None,
     compute_stress: bool = False,
     compute_hirshfeld: bool = False,
@@ -33,6 +34,7 @@ def evaluate_model(
     compute_partial_charges: bool = False,
     return_att: bool = False,
     dtype: str = "float64",
+    key_spec: Optional[mace_data.utils.KeySpecification] = None,
 ) -> dict[str, Union[np.ndarray, List[np.ndarray]]]:
     """
     Evaluate a model on a list of ASE atoms objects.
@@ -87,14 +89,18 @@ def evaluate_model(
         "so3krates",
         "mace",
     ], f"Unknown model type: {model_type}"
+    key_spec = (
+        mace_data.utils.KeySpecification() if key_spec is None else key_spec
+    )
 
-    data_loader = create_dataloader(
+    data_loader = create_dataloader_from_list(
         atoms_list=atoms_list,
         batch_size=batch_size,
         r_max=model.r_max,
         r_max_lr=r_max_lr,
         shuffle=False,
         drop_last=False,
+        key_specification=key_spec,
     )
 
     # Collect data
@@ -127,9 +133,9 @@ def evaluate_model(
             return_att=return_att,
         )
         energies = torch_tools.to_numpy(output["energy"])
-        energies = [energy.item() for energy in energies]
-        energies_list += energies
 
+        energies = [energy for energy in energies]
+        energies_list += energies
         if compute_stress:
             stresses = torch_tools.to_numpy(output["stress"])
             stresses = [stress for stress in stresses]
@@ -184,12 +190,12 @@ def evaluate_model(
         forces = np.split(
             torch_tools.to_numpy(output["forces"]),
             indices_or_sections=batch.ptr[1:],
-            axis=0,
+            axis=0 if not multihead_model else 1,
         )[:-1]
         forces = [force for force in forces]
         forces_list += forces
 
-    if multi_species:
+    if multi_species or multihead_model:
         energies = energies_list
         forces = forces_list
         if compute_stress:
@@ -239,12 +245,14 @@ def ensemble_prediction(
     dtype: str = "float64",
     batch_size: int = 1,
     multi_species: bool = False,
+    multihead_model: bool = False,
     r_max_lr: float = 12.0,
     dispersion_energy_cutoff_lr_damping: Optional[float] = None,
     compute_stress: bool = False,
     compute_hirshfeld: bool = False,
     compute_dipole: bool = False,
     compute_partial_charges: bool = False,
+    key_spec: Optional[mace_data.utils.KeySpecification] = None,
 ) -> np.array:
     """
     Generate ensemble predictions for a list of ASE atoms objects using
@@ -308,7 +316,9 @@ def ensemble_prediction(
         all_dipoles = []
     if compute_partial_charges:
         all_partial_charges = []
-
+    key_spec = (
+        mace_data.utils.KeySpecification() if key_spec is None else key_spec
+    )
     i = 0
     for model in models:
         results = evaluate_model(
@@ -325,6 +335,7 @@ def ensemble_prediction(
             compute_dipole=compute_dipole,
             compute_partial_charges=compute_partial_charges,
             dtype=dtype,
+            key_spec=key_spec,
         )
         all_forces.append(results["forces"])
         all_energies.append(results["energies"])
@@ -338,7 +349,7 @@ def ensemble_prediction(
             all_partial_charges.append(results["partial_charges"])
         i += 1
 
-    if not multi_species:
+    if not multi_species and not multihead_model:
         # Stack for fixed-size molecules
         all_forces = np.stack(all_forces).reshape(
             (len(models), len(atoms_list), -1, 3)
@@ -442,7 +453,7 @@ class ModelEval(Metric):
 
         if output.get("energy") is not None and batch.energy is not None:
             self.E_computed += 1.0
-            self.delta_es.append(batch.energy - output["energy"])
+            self.delta_es.append(batch.energy - output["energy"].squeeze())
             self.delta_es_per_atom.append(
                 (batch.energy - output["energy"])
                 / (batch.ptr[1:] - batch.ptr[:-1])
@@ -641,6 +652,7 @@ def test_ensemble(
     device: str,
     path_to_data: str = None,
     atoms_list: list = None,
+    head_name: str = "head",
     logger: MetricsLogger = None,
     log_errors: str = "PerAtomMAE",
     return_predictions: bool = False,
@@ -651,6 +663,9 @@ def test_ensemble(
     dipole_key: str = "REF_dipole",
     hirshfeld_key: str = "REF_hirsh_ratios",
     charges_key: str = "REF_charges",
+    total_charge_key: str = "charge",
+    total_spin_key: str = "spin",
+    head_key: str = "head",
     r_max_lr: float = 12.0,
     log: bool = False,
 ) -> Tuple[dict, dict]:
@@ -711,6 +726,9 @@ def test_ensemble(
         info_keys={
             "energy": energy_key,
             "dipole": dipole_key,
+            "total_charge": total_charge_key,
+            "total_spin": total_spin_key,
+            "head": head_key,
         },
         arrays_keys={
             "forces": forces_key,
@@ -725,7 +743,7 @@ def test_ensemble(
     reference_model = ensemble[list(ensemble.keys())[0]]
 
     # Create dataloader using the create_dataloader function
-    data_loader = create_dataloader(
+    data_loader = create_dataloader_from_list(
         atoms_list=data_to_use,
         batch_size=batch_size,
         r_max=reference_model.r_max,
@@ -733,6 +751,7 @@ def test_ensemble(
         key_specification=keyspec,
         shuffle=False,
         drop_last=False,
+        head_name=head_name,
     )
 
     ensemble_metrics = {}

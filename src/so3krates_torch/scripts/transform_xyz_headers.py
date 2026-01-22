@@ -1,4 +1,5 @@
 import re
+import os
 
 # Mapping of replacements
 replacements = {
@@ -22,7 +23,14 @@ def process_xyz(input_file, output_file):
         f.write(text)
 
 
-process_xyz(
-    "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/development_junk/md17_ethanol_small.xyz",
-    "/home/thenkes/Documents/Uni/Promotion/Research/torchkrates/So3krates-torch/development_junk/training/md17_ethanol_small.xyz",
-)
+folder = "/home/thenkes/Downloads/testing_data/"
+file_list = [
+    filename for filename in os.listdir(folder) if filename.endswith("xyz")
+]
+
+for input_file in file_list:
+    print(f"Processing {input_file}")
+    output_file = (
+        f"/home/thenkes/Downloads/testing_data/processed_{input_file}"
+    )
+    process_xyz(f"{folder}/{input_file}", output_file)

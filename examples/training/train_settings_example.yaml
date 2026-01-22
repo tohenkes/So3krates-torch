@@ -3,19 +3,18 @@ GENERAL:
   checkpoints_dir: ./checkpoints
   model_dir: ./model
   log_dir: ./logs
-  default_dtype: float32
-  compute_stress: False
+  default_dtype: float64
   seed: 100
 
 ARCHITECTURE:
   activation_fn: silu
-  r_max: 4.5
-  cutoff_lr: null
+  r_max: 6.
+  r_max_lr: 12.0
   cutoff_fn: phys
-  degrees: [1, 2, 3, 4]
+  degrees: [1,2,3,4]
   dispersion_energy_bool: true
   dispersion_energy_scale: 1.2
-  dispersion_energy_cutoff_lr_damping: 12.0  
+  dispersion_energy_cutoff_lr_damping: 2.0
   electrostatic_energy_bool: true
   electrostatic_energy_scale: 4.0
   energy_activation_fn: silu
@@ -46,25 +45,19 @@ TRAINING:
   weight_decay: 0.
   lr: 0.001
   optimizer: adam
+  amsgrad: True
   scheduler: exponential_decay 
-  lr_scheduler_gamma: 0.9993
-  ema: True
-  ema_decay: 0.99
-  energy_weight: 1.
+  lr_scheduler_gamma: 0.85
+  energy_weight: 0.
   forces_weight: 1000.
-  eval_interval: 5
-  num_epochs: 150
-  path_to_train_data: ./md17_ethanol_small.xyz
+  eval_interval: 1
+  num_epochs: 5
+  path_to_train_data: ./path/to/train/data
   valid_ratio: 0.1
   clip_grad: 10.0
   neighbors_lr_cutoff: 100.
   patience: 50
 
+
 MISC:
-  device: cuda
-  keep_checkpoints: False
-  restart_latest: True 
-  error_table: PerAtomMAE
-  log_level: INFO
-  log_wandb: False
-  no_checkpoint: False
+  device: cpu

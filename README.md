@@ -17,8 +17,8 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 1. ASE calculator for MD (including pre-trained SO3LR)
 2. Inference over ase readable datasets: `torchkrates-eval`
 3. Error metrics over ase readable datasets: `torchkrates-test`
-4. Transforming pyTorch and JAX parameter formates: `torchkrates-jax2torch` or `torchkrates-torch2jax` (for these you need to install jax, flax, and mlff (https://github.com/thorben-frank/mlff))
-6. Training: `torchkrates-train --config config.yaml` (see example)
+4. Transforming pyTorch and JAX parameter formates: `torchkrates-jax2torch` or `torchkrates-torch2jax` (for these you need to install jax, flax, and mlff (https://github.com/thorben-frank/mlff/tree/v1.0-lrs-gems))
+5. Training: `torchkrates-train --config config.yaml` (see example)
 
 
 > [!IMPORTANT]
@@ -27,6 +27,8 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 
 
 ## TODO
+- [ ] test loading/training hirshfeld ratios, partial charges
+- [ ] finetuning
 - [ ] enable torch.script (important for openmm)
 
 

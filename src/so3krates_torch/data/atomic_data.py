@@ -1,6 +1,6 @@
 ###########################################################################################
 
-# Taken from MACE package: https://github.com/ACEsuit/mace
+# Taken from MACE package: https://github.com/ACEsuit/mace and modified for So3krates/SO3LR
 
 # Atomic Data Class for handling molecules as graphs
 # Authors: Ilyes Batatia, Gregor Simm
@@ -215,7 +215,6 @@ class AtomicData(torch_geometric.data.Data):
             head = torch.tensor(heads.index(config.head), dtype=torch.long)
         except ValueError:
             head = torch.tensor(len(heads) - 1, dtype=torch.long)
-
         cell = (
             torch.tensor(cell, dtype=torch.get_default_dtype())
             if cell is not None
