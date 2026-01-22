@@ -25,13 +25,6 @@ Lightweight implementation of the So3krates model in pytorch. This package is mo
 > Number 4 means that you can transform the weights from this pytorch version into the JAX version and vice versa. Inference and training is much faster (*at least 1 order of magnitude at the moment*) in the JAX version. This implementation is mostly for prototyping and compatability with other packages.
 
 
-
-## TODO
-- [ ] test loading/training hirshfeld ratios, partial charges
-- [ ] finetuning
-- [ ] enable torch.script (important for openmm)
-
-
 ## Cite
 If you are using the models implemented here please cite:
 
