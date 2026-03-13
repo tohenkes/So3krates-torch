@@ -54,6 +54,15 @@ TRAINING:
   num_epochs: 5
   path_to_train_data: ./path/to/train/data
   valid_ratio: 0.1
+  # dataset_mode: eager | lazy | cached
+  #   eager (default): loads all data into memory upfront
+  #   lazy: defers graph construction to __getitem__, atoms loaded at init
+  #   cached: like lazy, but caches constructed graphs to disk
+  dataset_mode: eager
+  # num_workers: DataLoader worker processes (useful with lazy/cached)
+  num_workers: 0
+  # cache_dir: override disk cache directory (default: {data_path}.so3cache)
+  # cache_dir: null
   clip_grad: 10.0
   neighbors_lr_cutoff: 100.
   patience: 50

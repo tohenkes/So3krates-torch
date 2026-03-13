@@ -7,12 +7,18 @@ from ase.io import read
 import random
 from typing import Tuple, Union
 from so3krates_torch.modules.models import SO3LR, MultiHeadSO3LR
+from torch.utils.data import Subset
 from so3krates_torch.tools.utils import (
     create_dataloader_from_list,
     create_data_from_list,
     create_dataloader_from_data,
+    create_dataloader_from_dataset,
     create_configs_from_list,
     create_data_from_configs,
+)
+from so3krates_torch.data.datasets import (
+    XYZDataset,
+    DiskCache,
 )
 from so3krates_torch.modules.loss import (
     WeightedEnergyForcesLoss,
@@ -264,8 +270,18 @@ def setup_data_loaders(config: dict) -> tuple:
         )
 
     else:
-        # Load data
         data_path = config["TRAINING"]["path_to_train_data"]
+        dataset_mode = config["TRAINING"].get("dataset_mode", "eager")
+        num_workers = config["TRAINING"].get("num_workers", 0)
+
+        if dataset_mode in ("lazy", "cached"):
+            return _setup_data_loaders_dataset(
+                config, keyspec, data_path, dataset_mode,
+                batch_size, valid_batch_size, r_max, r_max_lr,
+                num_workers,
+            )
+
+        # Eager mode (default) — original code path
         logging.info(f"Loading data from {data_path}")
         data = read(data_path, index=":")
 
@@ -330,6 +346,117 @@ def setup_data_loaders(config: dict) -> tuple:
             num_elements,
             average_atomic_energy_shifts,
         )
+
+
+def _setup_data_loaders_dataset(
+    config, keyspec, data_path, dataset_mode,
+    batch_size, valid_batch_size, r_max, r_max_lr,
+    num_workers,
+):
+    """Setup data loaders using map-style XYZDataset."""
+    lazy = dataset_mode == "lazy"
+    cache_dir = config["TRAINING"].get("cache_dir", None)
+
+    cache = None
+    if dataset_mode == "cached":
+        cache = DiskCache(
+            cache_dir=cache_dir or f"{data_path}.so3cache",
+            cutoff=r_max,
+            cutoff_lr=r_max_lr,
+            source_file=data_path,
+        )
+
+    train_dataset = XYZDataset(
+        file_path=data_path,
+        cutoff=r_max,
+        cutoff_lr=r_max_lr,
+        key_specification=keyspec,
+        cache=cache,
+        lazy=lazy,
+    )
+
+    # E0 computation: iterate configs without graph construction
+    train_configs = list(train_dataset.iter_configs())
+    average_atomic_energy_shifts = compute_average_E0s(
+        collections_train=train_configs,
+        z_table=AtomicNumberTable([int(z) for z in range(1, 119)]),
+    )
+
+    # Validation split
+    val_data_path = config["TRAINING"].get("path_to_val_data")
+    if val_data_path:
+        val_cache = None
+        if dataset_mode == "cached":
+            val_cache = DiskCache(
+                cache_dir=(
+                    cache_dir + "_val"
+                    if cache_dir
+                    else f"{val_data_path}.so3cache"
+                ),
+                cutoff=r_max,
+                cutoff_lr=r_max_lr,
+                source_file=val_data_path,
+            )
+        val_dataset = XYZDataset(
+            file_path=val_data_path,
+            cutoff=r_max,
+            cutoff_lr=r_max_lr,
+            key_specification=keyspec,
+            cache=val_cache,
+            lazy=lazy,
+        )
+        logging.info(
+            f"Using separate validation data from {val_data_path}"
+        )
+    else:
+        valid_ratio = config["TRAINING"].get("valid_ratio", 0.1)
+        num_train = config["TRAINING"].get("num_train", None)
+        num_valid = config["TRAINING"].get("num_valid", None)
+        n_total = len(train_dataset)
+        n_valid = max(1, int(n_total * valid_ratio))
+        n_train = n_total - n_valid
+        if num_train is not None:
+            n_train = min(n_train, num_train)
+        if num_valid is not None:
+            n_valid = min(n_valid, num_valid)
+        indices = list(range(n_total))
+        random.shuffle(indices)
+        train_indices = indices[:n_train]
+        val_indices = indices[n_train : n_train + n_valid]
+        val_dataset = Subset(train_dataset, val_indices)
+        train_dataset = Subset(train_dataset, train_indices)
+        logging.info(
+            f"Splitting data with validation ratio {valid_ratio}"
+        )
+
+    train_loader = create_dataloader_from_dataset(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+    )
+    valid_loader = create_dataloader_from_dataset(
+        dataset=val_dataset,
+        batch_size=valid_batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+    )
+
+    num_elements = determine_num_elements(train_loader)
+    avg_num_neighbors = compute_avg_num_neighbors(train_loader)
+
+    logging.info(f"Training set size: {len(train_dataset)}")
+    logging.info(f"Validation set size: {len(val_dataset)}")
+    logging.info(
+        f"Number of unique elements in training set: {num_elements}"
+    )
+    return (
+        train_loader,
+        {"main": valid_loader},
+        avg_num_neighbors,
+        num_elements,
+        average_atomic_energy_shifts,
+    )
 
 
 def set_avg_num_neighbors_in_model(

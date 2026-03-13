@@ -684,3 +684,19 @@ def create_dataloader_from_data(
         drop_last=drop_last,
     )
     return data_loader
+
+
+def create_dataloader_from_dataset(
+    dataset,
+    batch_size: int,
+    shuffle: bool = False,
+    drop_last: bool = False,
+    num_workers: int = 0,
+):
+    return torch_geometric.dataloader.DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+    )
