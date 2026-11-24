@@ -1,5 +1,8 @@
 # So3krates-torch
 
+> [!IMPORTANT]
+> UPDATES AND DEVELOPMENT SWITCHED TO https://github.com/TCPUniLU/So3krates-torch !!!
+
 Implementation of the So3krates + SO3LR model in pytorch.
 
 #### Installation
