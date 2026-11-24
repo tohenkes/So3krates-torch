@@ -9,8 +9,599 @@
 # This program is distributed under the MIT License (see MIT.md)
 ###########################################################################################
 
-from typing import Dict, NamedTuple, Optional, Tuple
+import logging
+from dataclasses import dataclass, field
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+)
+
+import ase.data
+import ase.io
+import h5py
+import numpy as np
 import torch
+
+from so3krates_torch.tools.default_keys import DefaultKeys
+from so3krates_torch.tools.gather import gather_rows
+from so3krates_torch.tools.utils import AtomicNumberTable
+
+Positions = np.ndarray  # [..., 3]
+Cell = np.ndarray  # [3,3]
+Pbc = tuple  # (3,)
+
+DEFAULT_CONFIG_TYPE = "Default"
+DEFAULT_CONFIG_TYPE_WEIGHTS = {DEFAULT_CONFIG_TYPE: 1.0}
+
+
+@dataclass
+class KeySpecification:
+    info_keys: Dict[str, str] = field(default_factory=dict)
+    arrays_keys: Dict[str, str] = field(default_factory=dict)
+
+    def update(
+        self,
+        info_keys: Optional[Dict[str, str]] = None,
+        arrays_keys: Optional[Dict[str, str]] = None,
+    ):
+        if info_keys is not None:
+            self.info_keys.update(info_keys)
+        if arrays_keys is not None:
+            self.arrays_keys.update(arrays_keys)
+        return self
+
+    @classmethod
+    def from_defaults(cls):
+        instance = cls()
+        return update_keyspec_from_kwargs(instance, DefaultKeys.keydict())
+
+
+def update_keyspec_from_kwargs(
+    keyspec: KeySpecification, keydict: Dict[str, str]
+) -> KeySpecification:
+    # convert command line style property_key arguments into a keyspec
+    infos = [
+        "energy_key",
+        "stress_key",
+        "virials_key",
+        "dipole_key",
+        "head_key",
+        "elec_temp_key",
+        "total_charge_key",
+        "polarizability_key",
+        "total_spin_key",
+    ]
+    arrays = [
+        "forces_key",
+        "charges_key",
+        "hirshfeld_ratios_key",
+        "c6_ratios_key",
+    ]
+    info_keys = {}
+    arrays_keys = {}
+    for key in infos:
+        if key in keydict:
+            info_keys[key[:-4]] = keydict[key]
+    for key in arrays:
+        if key in keydict:
+            arrays_keys[key[:-4]] = keydict[key]
+    keyspec.update(info_keys=info_keys, arrays_keys=arrays_keys)
+    return keyspec
+
+
+# Alternative atoms.arrays keys for per-atom dispersion ratio labels,
+# tried in order when the configured key is absent. Mirrors the JAX
+# so3lr loader (`dataloader_sparse_ase.py`): the polarizability ratio
+# has been stored as 'hirshfeld_ratios', 'hirsh_ratios' and (tauri)
+# 'a0_ratios'; JAX stores C6 ratios as 'c6_ratios'.
+RATIO_LABEL_FALLBACKS = {
+    "hirshfeld_ratios": ("hirshfeld_ratios", "hirsh_ratios", "a0_ratios"),
+    "c6_ratios": ("c6_ratios",),
+}
+
+
+def resolve_arrays_key(
+    name: str, atoms_key: str, available: Iterable[str]
+) -> Optional[str]:
+    """Return the key under which property `name` is stored, trying
+    the configured `atoms_key` first and then the fallbacks in
+    `RATIO_LABEL_FALLBACKS`; None if none is available."""
+    available = set(available)
+    for key in (atoms_key, *RATIO_LABEL_FALLBACKS.get(name, ())):
+        if key in available:
+            return key
+    return None
+
+
+@dataclass
+class Configuration:
+    atomic_numbers: np.ndarray
+    positions: Positions  # Angstrom
+    properties: Dict[str, Any]
+    property_weights: Dict[str, float]
+    cell: Optional[Cell] = None
+    pbc: Optional[Pbc] = None
+
+    weight: float = 1.0  # weight of config in loss
+    config_type: str = DEFAULT_CONFIG_TYPE  # config_type of config
+    head: str = "Default"  # head used to compute the config
+    theory_level: Optional[int] = None  # integer index 0..num_theory_levels-1
+
+
+Configurations = List[Configuration]
+
+
+def random_train_valid_split(
+    items: Sequence, valid_fraction: float, seed: int, work_dir: str
+) -> Tuple[List, List]:
+    assert 0.0 < valid_fraction < 1.0
+
+    size = len(items)
+    # guarantee at least one validation, mostly for tests with tiny fitting databases
+    assert size > 1
+    train_size = min(size - int(valid_fraction * size), size - 1)
+
+    indices = list(range(size))
+    rng = np.random.default_rng(seed)
+    rng.shuffle(indices)
+    if len(indices[train_size:]) < 10:
+        logging.info(
+            f"Using random {100 * valid_fraction:.0f}% of training set for validation with following indices: {indices[train_size:]}"
+        )
+    else:
+        # Save indices to file
+        with open(
+            work_dir + f"/valid_indices_{seed}.txt", "w", encoding="utf-8"
+        ) as f:
+            for index in indices[train_size:]:
+                f.write(f"{index}\n")
+
+        logging.info(
+            f"Using random {100 * valid_fraction:.0f}% of training set for validation with indices saved in: {work_dir}/valid_indices_{seed}.txt"
+        )
+
+    return (
+        [items[i] for i in indices[:train_size]],
+        [items[i] for i in indices[train_size:]],
+    )
+
+
+def config_from_atoms_list(
+    atoms_list: List[ase.Atoms],
+    key_specification: KeySpecification,
+    config_type_weights: Optional[Dict[str, float]] = None,
+    head_name: str = "Default",
+) -> Configurations:
+    """Convert list of ase.Atoms into Configurations"""
+    if config_type_weights is None:
+        config_type_weights = DEFAULT_CONFIG_TYPE_WEIGHTS
+
+    all_configs = []
+    for atoms in atoms_list:
+        all_configs.append(
+            config_from_atoms(
+                atoms,
+                key_specification=key_specification,
+                config_type_weights=config_type_weights,
+                head_name=head_name,
+            )
+        )
+    return all_configs
+
+
+def config_from_atoms(
+    atoms: ase.Atoms,
+    key_specification: KeySpecification = KeySpecification(),
+    config_type_weights: Optional[Dict[str, float]] = None,
+    head_name: str = "Default",
+) -> Configuration:
+    """Convert ase.Atoms to Configuration"""
+    if config_type_weights is None:
+        config_type_weights = DEFAULT_CONFIG_TYPE_WEIGHTS
+
+    atomic_numbers = np.array(
+        [ase.data.atomic_numbers[symbol] for symbol in atoms.symbols]
+    )
+    pbc = tuple(atoms.get_pbc())
+    cell = np.array(atoms.get_cell())
+    config_type = atoms.info.get("config_type", "Default")
+    weight = atoms.info.get("config_weight", 1.0) * config_type_weights.get(
+        config_type, 1.0
+    )
+
+    properties = {}
+    property_weights = {}
+    for name in list(key_specification.arrays_keys) + list(
+        key_specification.info_keys
+    ):
+        property_weights[name] = atoms.info.get(f"config_{name}_weight", 1.0)
+
+    for name, atoms_key in key_specification.info_keys.items():
+        properties[name] = atoms.info.get(atoms_key, None)
+        if not atoms_key in atoms.info:
+            property_weights[name] = 0.0
+
+    for name, atoms_key in key_specification.arrays_keys.items():
+        found_key = resolve_arrays_key(name, atoms_key, atoms.arrays.keys())
+        properties[name] = (
+            atoms.arrays[found_key] if found_key is not None else None
+        )
+        if found_key is None:
+            property_weights[name] = 0.0
+
+    # Use per-structure head from atoms.info if available,
+    # otherwise fall back to the caller-supplied default.
+    head = atoms.info.get("head", head_name)
+
+    theory_level_raw = atoms.info.get("theory_level", None)
+    theory_level = (
+        int(theory_level_raw) if theory_level_raw is not None else None
+    )
+
+    return Configuration(
+        atomic_numbers=atomic_numbers,
+        positions=atoms.get_positions(),
+        properties=properties,
+        weight=weight,
+        property_weights=property_weights,
+        head=head,
+        config_type=config_type,
+        pbc=pbc,
+        cell=cell,
+        theory_level=theory_level,
+    )
+
+
+def property_presence_from_configs(
+    configs: "Configurations",
+    property_names: Sequence[str],
+) -> Dict[str, bool]:
+    """Check whether each named property's data is actually present
+    (not None) in at least one of the given configs.
+
+    Presence is judged from the property VALUE, not from
+    `property_weights` — a deliberate per-structure
+    `config_<name>_weight=0` override on data that is genuinely
+    present must not be mistaken for the property being absent."""
+    return {
+        name: any(c.properties.get(name) is not None for c in configs)
+        for name in property_names
+    }
+
+
+def pluralize_property_clause(names: Sequence[str]) -> Tuple[str, str, str]:
+    """Return (noun, verb, was_were) agreeing in number with `names`,
+    for building "The following property/properties has/have ...
+    was/were ..." error messages consistently across call sites."""
+    if len(names) == 1:
+        return "property", "has", "was"
+    return "properties", "have", "were"
+
+
+def raise_if_properties_missing(
+    presence: Dict[str, bool],
+    key_specification: KeySpecification,
+    file_path: str,
+) -> None:
+    """Raise a ValueError listing every property that is missing
+    from presence (i.e. presence[name] is False), naming the key
+    that was looked up for it in the data file."""
+    missing = [name for name, present in presence.items() if not present]
+    if not missing:
+        return
+
+    lines = []
+    for name in missing:
+        key = key_specification.info_keys.get(
+            name
+        ) or key_specification.arrays_keys.get(name)
+        key_desc = f"key '{key}'" if key else "its configured key"
+        lines.append(f"  - '{name}': looked for {key_desc}")
+
+    noun, verb, was_were = pluralize_property_clause(missing)
+    raise ValueError(
+        f"The following {noun} {verb} a non-zero loss weight but "
+        f"{was_were} not found in "
+        f"'{file_path}':\n"
+        + "\n".join(lines)
+        + "\nCheck that the corresponding '<name>_key' under TRAINING.keys "
+        "matches the column name actually used in your data file, or set "
+        "the loss weight to 0 if this property should not be used."
+    )
+
+
+def test_config_types(
+    test_configs: Configurations,
+) -> List[Tuple[str, List[Configuration]]]:
+    """Split test set based on config_type-s"""
+    test_by_ct = []
+    all_cts = []
+    for conf in test_configs:
+        if conf.head is None:
+            conf.head = ""
+        config_type_name = conf.config_type + "_" + conf.head
+        if config_type_name not in all_cts:
+            all_cts.append(config_type_name)
+            test_by_ct.append((config_type_name, [conf]))
+        else:
+            ind = all_cts.index(config_type_name)
+            test_by_ct[ind][1].append(conf)
+    return test_by_ct
+
+
+def load_from_xyz(
+    file_path: str,
+    key_specification: KeySpecification,
+    head_name: str = "Default",
+    config_type_weights: Optional[Dict] = None,
+    extract_atomic_energies: bool = False,
+    keep_isolated_atoms: bool = False,
+    no_data_ok: bool = False,
+) -> Tuple[Dict[int, float], Configurations]:
+    atoms_list = ase.io.read(file_path, index=":")
+    energy_key = key_specification.info_keys["energy"]
+    forces_key = key_specification.arrays_keys["forces"]
+    stress_key = key_specification.info_keys["stress"]
+    head_key = key_specification.info_keys["head"]
+    original_energy_key = energy_key
+    original_forces_key = forces_key
+    original_stress_key = stress_key
+    if energy_key == "energy":
+        logging.warning(
+            "Since ASE version 3.23.0b1, using energy_key 'energy' is no longer safe when communicating between torchkrates and ASE. We recommend using a different key, rewriting 'energy' to 'REF_energy'. You need to use --energy_key='REF_energy' to specify the chosen key name."
+        )
+        key_specification.info_keys["energy"] = "REF_energy"
+        for atoms in atoms_list:
+            try:
+                atoms.info["REF_energy"] = atoms.get_potential_energy()
+            except Exception as e:  # pylint: disable=W0703
+                logging.error(f"Failed to extract energy: {e}")
+                atoms.info["REF_energy"] = None
+    if forces_key == "forces":
+        logging.warning(
+            "Since ASE version 3.23.0b1, using forces_key 'forces' is no longer safe when communicating between torchkrates and ASE. We recommend using a different key, rewriting 'forces' to 'REF_forces'. You need to use --forces_key='REF_forces' to specify the chosen key name."
+        )
+        key_specification.arrays_keys["forces"] = "REF_forces"
+        for atoms in atoms_list:
+            try:
+                atoms.arrays["REF_forces"] = atoms.get_forces()
+            except Exception as e:  # pylint: disable=W0703
+                logging.error(f"Failed to extract forces: {e}")
+                atoms.arrays["REF_forces"] = None
+    if stress_key == "stress":
+        logging.warning(
+            "Since ASE version 3.23.0b1, using stress_key 'stress' is no longer safe when communicating between torchkrates and ASE. We recommend using a different key, rewriting 'stress' to 'REF_stress'. You need to use --stress_key='REF_stress' to specify the chosen key name."
+        )
+        key_specification.info_keys["stress"] = "REF_stress"
+        for atoms in atoms_list:
+            try:
+                atoms.info["REF_stress"] = atoms.get_stress()
+            except Exception as e:  # pylint: disable=W0703
+                atoms.info["REF_stress"] = None
+
+    final_energy_key = key_specification.info_keys["energy"]
+    final_forces_key = key_specification.arrays_keys["forces"]
+    final_dipole_key = key_specification.info_keys.get("dipole", "REF_dipole")
+    has_energy = any(final_energy_key in atoms.info for atoms in atoms_list)
+    has_forces = any(final_forces_key in atoms.arrays for atoms in atoms_list)
+    has_dipole = any(final_dipole_key in atoms.info for atoms in atoms_list)
+
+    if not has_energy and not has_forces and not has_dipole:
+        msg = f"None of '{final_energy_key}', '{final_forces_key}', and '{final_dipole_key}' found in '{file_path}'."
+        if no_data_ok:
+            logging.warning(
+                msg + " Continuing because no_data_ok=True was passed in."
+            )
+        else:
+            raise ValueError(
+                msg
+                + " Please change the key names in the command line arguments or ensure that the file contains the required data."
+            )
+    if not has_energy:
+        logging.warning(
+            f"No energies found with key '{final_energy_key}' in '{file_path}'. If this is unexpected, please change the key name in the command line arguments or ensure that the file contains the required data."
+        )
+    if not has_forces:
+        logging.warning(
+            f"No forces found with key '{final_forces_key}' in '{file_path}'. If this is unexpected, Please change the key name in the command line arguments or ensure that the file contains the required data."
+        )
+
+    if not isinstance(atoms_list, list):
+        atoms_list = [atoms_list]
+
+    atomic_energies_dict = {}
+    if extract_atomic_energies:
+        atoms_without_iso_atoms = []
+
+        for idx, atoms in enumerate(atoms_list):
+            atoms.info[head_key] = head_name
+            isolated_atom_config = (
+                len(atoms) == 1
+                and atoms.info.get("config_type") == "IsolatedAtom"
+            )
+            if isolated_atom_config:
+                atomic_number = int(atoms.get_atomic_numbers()[0])
+                if energy_key in atoms.info.keys():
+                    atomic_energies_dict[atomic_number] = float(
+                        atoms.info[energy_key]
+                    )
+                else:
+                    logging.warning(
+                        f"Configuration '{idx}' is marked as 'IsolatedAtom' "
+                        "but does not contain an energy. Zero energy will be used."
+                    )
+                    atomic_energies_dict[atomic_number] = 0.0
+            else:
+                atoms_without_iso_atoms.append(atoms)
+
+        if len(atomic_energies_dict) > 0:
+            logging.info("Using isolated atom energies from training file")
+        if not keep_isolated_atoms:
+            atoms_list = atoms_without_iso_atoms
+
+    for atoms in atoms_list:
+        atoms.info[head_key] = head_name
+
+    configs = config_from_atoms_list(
+        atoms_list,
+        config_type_weights=config_type_weights,
+        key_specification=key_specification,
+        head_name=head_name,
+    )
+    key_specification.info_keys["energy"] = original_energy_key
+    key_specification.arrays_keys["forces"] = original_forces_key
+    key_specification.info_keys["stress"] = original_stress_key
+    return atomic_energies_dict, configs
+
+
+def compute_average_E0s(
+    collections_train: Configurations, z_table: AtomicNumberTable
+) -> Dict[int, float]:
+    """
+    Function to compute the average interaction energy of each chemical element
+    returns dictionary of E0s
+    """
+    valid = [
+        c for c in collections_train if c.properties.get("energy") is not None
+    ]
+    if not valid:
+        logging.warning(
+            "No energies found in training data; atomic energy "
+            "shifts (E0s) set to zero. Training will use forces only."
+        )
+        return {z: 0.0 for z in z_table.zs}
+
+    len_train = len(valid)
+    len_zs = len(z_table)
+    A = np.zeros((len_train, len_zs))
+    B = np.zeros(len_train)
+    for i in range(len_train):
+        B[i] = valid[i].properties["energy"]
+        for j, z in enumerate(z_table.zs):
+            A[i, j] = np.count_nonzero(valid[i].atomic_numbers == z)
+    try:
+        E0s = np.linalg.lstsq(A, B, rcond=None)[0]
+        atomic_energies_dict = {}
+        for i, z in enumerate(z_table.zs):
+            atomic_energies_dict[z] = E0s[i]
+    except np.linalg.LinAlgError:
+        logging.error(
+            "Failed to compute E0s using least squares regression, using the same for all atoms"
+        )
+        atomic_energies_dict = {}
+        for i, z in enumerate(z_table.zs):
+            atomic_energies_dict[z] = 0.0
+    return atomic_energies_dict
+
+
+def compute_average_E0s_from_dataset(
+    dataset, z_table: "AtomicNumberTable"
+) -> Dict[int, float]:
+    """Compute average atomic energy shifts from a dataset
+    of AtomicData objects (e.g. PreprocessedHDF5Dataset).
+
+    Uses the same least-squares approach as
+    compute_average_E0s but works directly with
+    AtomicData tensors instead of Configuration objects.
+    Samples whose energy_weight is 0.0 (i.e. no reference
+    energy was provided) are skipped.
+    """
+    energies = []
+    atom_counts = []
+    for i in range(len(dataset)):
+        data = dataset[i]
+        if data.energy_weight is None or data.energy_weight.item() == 0.0:
+            continue
+        energies.append(data.energy.item())
+        atom_counts.append(
+            [(data.atomic_numbers == z).sum().item() for z in z_table.zs]
+        )
+
+    if not energies:
+        logging.warning(
+            "No energies found in preprocessed dataset; atomic "
+            "energy shifts (E0s) set to zero. "
+            "Training will use forces only."
+        )
+        return {z: 0.0 for z in z_table.zs}
+
+    A = np.array(atom_counts, dtype=float)
+    B = np.array(energies, dtype=float)
+    try:
+        E0s = np.linalg.lstsq(A, B, rcond=None)[0]
+        atomic_energies_dict = {}
+        for i, z in enumerate(z_table.zs):
+            atomic_energies_dict[z] = E0s[i]
+    except np.linalg.LinAlgError:
+        logging.error(
+            "Failed to compute E0s using least squares "
+            "regression, using zeros"
+        )
+        atomic_energies_dict = {}
+        for i, z in enumerate(z_table.zs):
+            atomic_energies_dict[z] = 0.0
+    return atomic_energies_dict
+
+
+def save_dataset_as_HDF5(dataset: List, out_name: str) -> None:
+    with h5py.File(out_name, "w") as f:
+        for i, data in enumerate(dataset):
+            save_AtomicData_to_HDF5(data, i, f)
+
+
+def save_AtomicData_to_HDF5(data, i, h5_file) -> None:
+    grp = h5_file.create_group(f"config_{i}")
+    grp["num_nodes"] = data.num_nodes
+    grp["edge_index"] = data.edge_index
+    grp["positions"] = data.positions
+    grp["shifts"] = data.shifts
+    grp["unit_shifts"] = data.unit_shifts
+    grp["cell"] = data.cell
+    grp["node_attrs"] = data.node_attrs
+    grp["weight"] = data.weight
+    grp["energy_weight"] = data.energy_weight
+    grp["forces_weight"] = data.forces_weight
+    grp["stress_weight"] = data.stress_weight
+    grp["virials_weight"] = data.virials_weight
+    grp["forces"] = data.forces
+    grp["energy"] = data.energy
+    grp["stress"] = data.stress
+    grp["virials"] = data.virials
+    grp["dipole"] = data.dipole
+    grp["charges"] = data.charges
+    grp["polarizability"] = data.polarizability
+    grp["head"] = data.head
+
+
+def save_configurations_as_HDF5(
+    configurations: Configurations, _, h5_file
+) -> None:
+    grp = h5_file.create_group("config_batch_0")
+    for j, config in enumerate(configurations):
+        subgroup_name = f"config_{j}"
+        subgroup = grp.create_group(subgroup_name)
+        subgroup["atomic_numbers"] = write_value(config.atomic_numbers)
+        subgroup["positions"] = write_value(config.positions)
+        properties_subgrp = subgroup.create_group("properties")
+        for key, value in config.properties.items():
+            properties_subgrp[key] = write_value(value)
+        subgroup["cell"] = write_value(config.cell)
+        subgroup["pbc"] = write_value(config.pbc)
+        subgroup["weight"] = write_value(config.weight)
+        weights_subgrp = subgroup.create_group("property_weights")
+        for key, value in config.property_weights.items():
+            weights_subgrp[key] = write_value(value)
+        subgroup["config_type"] = write_value(config.config_type)
+
+
+def write_value(value):
+    return value if value is not None else "None"
 
 
 def get_symmetric_displacement(
@@ -30,18 +621,22 @@ def get_symmetric_displacement(
         (num_graphs, 3, 3),
         dtype=positions.dtype,
         device=positions.device,
+        requires_grad=True,
     )
-    displacement.requires_grad_(True)
     symmetric_displacement = 0.5 * (
         displacement + displacement.transpose(-1, -2)
     )  # From https://github.com/mir-group/nequip
     positions = positions + torch.einsum(
-        "be,bec->bc", positions, symmetric_displacement[batch]
+        "be,bec->bc", positions, gather_rows(symmetric_displacement, batch)
     )
     cell = cell.view(-1, 3, 3)
     cell = cell + torch.matmul(cell, symmetric_displacement)
 
     return positions, cell, displacement
+
+
+# Above this many graphs the dense path (E x n_graphs x 3 floats) is not used.
+_DENSE_SHIFT_MAX_GRAPHS = 16
 
 
 def compute_shifts(
@@ -50,12 +645,27 @@ def compute_shifts(
     batch: torch.Tensor,
     sender: torch.Tensor,
 ) -> torch.Tensor:
-    shifts = torch.einsum(
-        "be,bec->bc",
-        unit_shifts,
-        cell[batch[sender]],
+    """Cartesian edge shifts ``unit_shifts @ cell[graph of the edge]``.
+
+    ``cell`` is ``[n_graphs, 3, 3]``.  Gathering the cell per edge
+    (``cell[batch[sender]]``) makes the backward pass accumulate every edge
+    into a handful of 3x3 rows with ``index_put_``, which is very slow on
+    CUDA.  For a few graphs the shifts are therefore computed for all graphs
+    with one dense matmul and each edge picks its own graph afterwards, so
+    the backward pass is a matmul too.
+    """
+    n_graphs = cell.shape[0]
+    if n_graphs == 1:
+        return unit_shifts @ cell[0]
+    if n_graphs <= _DENSE_SHIFT_MAX_GRAPHS:
+        all_graphs = (
+            unit_shifts @ cell.permute(1, 0, 2).reshape(3, n_graphs * 3)
+        ).view(-1, n_graphs, 3)
+        own = batch[sender].long().view(-1, 1, 1).expand(-1, 1, 3)
+        return torch.gather(all_graphs, 1, own).squeeze(1)
+    return torch.einsum(
+        "be,bec->bc", unit_shifts, gather_rows(cell, batch[sender])
     )
-    return shifts
 
 
 def get_edge_vectors_and_lengths(
@@ -65,10 +675,13 @@ def get_edge_vectors_and_lengths(
     normalize: bool = False,
     eps: float = 1e-9,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-
     sender = edge_index[0]
     receiver = edge_index[1]
-    vectors = positions[receiver] - positions[sender] + shifts  # [n_edges, 3]
+    vectors = (
+        gather_rows(positions, receiver)
+        - gather_rows(positions, sender)
+        + shifts
+    )  # [n_edges, 3]
     lengths = torch.linalg.norm(vectors, dim=-1, keepdim=True)  # [n_edges, 1]
     if normalize:
         vectors_normed = vectors / (lengths + eps)
@@ -95,6 +708,7 @@ class GraphContext(NamedTuple):
     cell: torch.Tensor
     node_heads: torch.Tensor
     interaction_kwargs: InteractionKwargs
+    vectors_all: Optional[torch.Tensor] = None
 
 
 def prepare_graph(
@@ -115,15 +729,17 @@ def prepare_graph(
     )
 
     if lammps_mliap:
-        raise NotImplementedError("LAMMPS MLIAP support is not implemented")
         n_real, n_total = data["natoms"][0], data["natoms"][1]
-        num_graphs = 2
+        num_graphs = 1  # LAMMPS always calls per-structure, no batching
         num_atoms_arange = torch.arange(
             n_real, device=data["node_attrs"].device
         )
         displacement = None
+        # Use n_total (real + ghost) so that positions matches the
+        # shape of per-atom tensors like partial_charges computed
+        # over all atoms in the graph.
         positions = torch.zeros(
-            (int(n_real), 3),
+            (int(n_total), 3),
             dtype=data["vectors"].dtype,
             device=data["vectors"].device,
         )
@@ -132,11 +748,28 @@ def prepare_graph(
             dtype=data["vectors"].dtype,
             device=data["vectors"].device,
         )
-        vectors = data["vectors"].requires_grad_(True)
+        if lr and "vectors_all" in data:
+            # LR LAMMPS mode: vectors_all is the leaf tensor,
+            # vectors and vectors_lr are derived via masking in
+            # _prepare_batch(). Autograd flows through to vectors_all.
+            vectors_all = data["vectors_all"]
+            vectors = data["vectors"]
+            vectors_lr = data["vectors_lr"]
+            lengths_lr = torch.linalg.vector_norm(
+                vectors_lr, dim=1, keepdim=True
+            )
+        else:
+            vectors_all = None
+            if not data["vectors"].requires_grad:
+                data["vectors"].requires_grad_(True)
+            vectors = data["vectors"]
+            vectors_lr = None
+            lengths_lr = None
         lengths = torch.linalg.vector_norm(vectors, dim=1, keepdim=True)
         ikw = InteractionKwargs(data["lammps_class"], (n_real, n_total))
     else:
-        data["positions"].requires_grad_(True)
+        if not data["positions"].requires_grad:
+            data["positions"].requires_grad_(True)
         positions = data["positions"]
         cell = data["cell"]
         num_atoms_arange = torch.arange(
@@ -198,4 +831,5 @@ def prepare_graph(
         cell=cell,
         node_heads=node_heads,
         interaction_kwargs=ikw,
+        vectors_all=(vectors_all if lammps_mliap else None),
     )

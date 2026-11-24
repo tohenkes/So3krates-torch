@@ -1,11 +1,15 @@
 import logging
-import torch
+import time
+
 import numpy as np
+import torch
+from ase.io import read
 from typing import Tuple, List, Union, Optional
-from mace import data as mace_data
-from mace.tools import torch_geometric, torch_tools
-from mace.tools.torch_tools import to_numpy
-from mace.tools.utils import (
+from so3krates_torch.data.utils import KeySpecification
+from so3krates_torch.tools import torch_geometric, torch_tools
+from so3krates_torch.modules.loss import ratio_label_mask
+from so3krates_torch.tools.torch_tools import to_numpy
+from so3krates_torch.tools.utils import (
     MetricsLogger,
     compute_mae,
     compute_q95,
@@ -15,7 +19,8 @@ from mace.tools.utils import (
 )
 from so3krates_torch.tools.utils import create_dataloader_from_list
 from torchmetrics import Metric
-import time
+
+logger = logging.getLogger(__name__)
 
 
 def evaluate_model(
@@ -24,17 +29,25 @@ def evaluate_model(
     batch_size: int,
     device: str,
     model_type: str,
-    r_max_lr: float = 12.0,
+    r_max_lr: Optional[float] = None,
     multi_species: bool = False,
     multihead_model: bool = False,
     dispersion_energy_cutoff_lr_damping: Optional[float] = None,
     compute_stress: bool = False,
     compute_hirshfeld: bool = False,
+    compute_c6_ratios: bool = False,
     compute_dipole: bool = False,
     compute_partial_charges: bool = False,
     return_att: bool = False,
+    return_inv_descriptors: bool = False,
+    return_eqv_descriptors: bool = False,
+    return_mean_inv_descriptors: bool = False,
+    return_mean_eqv_descriptors: bool = False,
     dtype: str = "float64",
-    key_spec: Optional[mace_data.utils.KeySpecification] = None,
+    key_spec: Optional[KeySpecification] = None,
+    theory_level_override: Optional[int] = None,
+    compile: bool = False,
+    fullgraph: Optional[bool] = None,
 ) -> dict[str, Union[np.ndarray, List[np.ndarray]]]:
     """
     Evaluate a model on a list of ASE atoms objects.
@@ -44,7 +57,7 @@ def evaluate_model(
         model (torch.nn.Module): Trained model to evaluate.
         batch_size (int): Batch size for evaluation.
         device (str): Device to evaluate the model on (e.g., "cpu", "cuda").
-        model_type (str): Type of model ("so3lr", "so3krates", "mace").
+        model_type (str): Type of model ("so3lr", "so3krates").
         r_max_lr (float, optional): Long-range cutoff radius. Defaults to 12.0.
         multi_species (bool, optional): Whether molecules have different
                                        numbers of atoms. Defaults to False.
@@ -61,6 +74,20 @@ def evaluate_model(
                                                  charges. Defaults to False.
         dtype (str, optional): Data type for model computations.
                               Defaults to "float64".
+        compile (bool, optional): Whether to compile the model with
+                                 `torch.compile` before evaluation.
+                                 Defaults to False.
+        fullgraph (bool, optional): Passed to `torch.compile`. Defaults
+                                   to True on CUDA devices and False
+                                   otherwise (CPU compilation of the
+                                   long-range terms currently crashes
+                                   Inductor's C++ backend regardless of
+                                   fullgraph).
+
+    Raises:
+        RuntimeError: If `compile=True` is requested for a long-range
+                     (`use_lr=True`) model on a non-CUDA device — this
+                     combination is not supported (see `fullgraph`).
 
     Returns:
         dict[str, Union[np.ndarray, List[np.ndarray]]]: Dictionary containing
@@ -87,11 +114,17 @@ def evaluate_model(
     assert model_type.lower() in [
         "so3lr",
         "so3krates",
-        "mace",
     ], f"Unknown model type: {model_type}"
-    key_spec = (
-        mace_data.utils.KeySpecification() if key_spec is None else key_spec
-    )
+    key_spec = KeySpecification() if key_spec is None else key_spec
+
+    # Resolve r_max_lr and damping from model when not explicitly provided.
+    # PME models (use_lr=False) resolve to None → no LR neighbor list built.
+    if r_max_lr is None:
+        r_max_lr = getattr(model, "r_max_lr", None)
+    if dispersion_energy_cutoff_lr_damping is None:
+        dispersion_energy_cutoff_lr_damping = getattr(
+            model, "dispersion_energy_cutoff_lr_damping", None
+        )
 
     data_loader = create_dataloader_from_list(
         atoms_list=atoms_list,
@@ -113,24 +146,79 @@ def evaluate_model(
         dipoles_list = []
     if compute_hirshfeld:
         hirshfeld_ratios_list = []
+    if compute_c6_ratios:
+        if not getattr(model, "c6_ratios_bool", False):
+            raise ValueError(
+                "compute_c6_ratios=True needs a model with a C6 ratio head "
+                "(c6_ratios_bool=True, SO3LR-tauri)."
+            )
+        c6_ratios_list = []
     if compute_partial_charges:
         partial_charges_list = []
     if return_att:
         att_scores_list = []
+    inv_descriptors_list = []
+    eqv_descriptors_list = []
+    mean_inv_list: list = []
+    mean_eqv_list: list = []
 
     if model_type == "so3lr":
-        model.r_max_lr = r_max_lr
-        model.dispersion_energy_cutoff_lr_damping = (
-            dispersion_energy_cutoff_lr_damping
-        )
+        if r_max_lr is not None:
+            model.r_max_lr = r_max_lr
+        if dispersion_energy_cutoff_lr_damping is not None:
+            model.dispersion_energy_cutoff_lr_damping = (
+                dispersion_energy_cutoff_lr_damping
+            )
     model = model.eval()
+    if compile:
+        is_cuda = str(device).startswith("cuda")
+        if not is_cuda and getattr(model, "use_lr", False):
+            raise RuntimeError(
+                f"torch.compile is not supported on this device "
+                f"({device}) for long-range SO3LR models: PyTorch's "
+                "Inductor CPU backend crashes while compiling the "
+                "ZBL/electrostatics/dispersion scatter-reductions (a "
+                "known upstream Inductor limitation, not something "
+                "so3krates-torch can fix). This has only been confirmed "
+                "working with torch.compile on CUDA. Pass compile=False, "
+                "or run on a CUDA device."
+            )
+        resolved_fullgraph = is_cuda if fullgraph is None else fullgraph
+        model = torch.compile(
+            model, dynamic=True, fullgraph=resolved_fullgraph
+        )
 
-    for batch in data_loader:
+    n_batches = len(data_loader)
+    n_structures = len(atoms_list)
+    log_every = max(1, n_batches // 10)
+    logger.info(
+        "evaluate_model: %d structures / %d batches",
+        n_structures,
+        n_batches,
+    )
+    t0 = time.perf_counter()
+    for batch_idx, batch in enumerate(data_loader):
         batch = batch.to(device)
+        batch.positions.requires_grad_(True)
+        batch_dict = batch.to_dict()
+        if theory_level_override is not None:
+            n_graphs = int(batch_dict["batch"].max().item()) + 1
+            batch_dict["theory_level"] = torch.full(
+                (n_graphs,),
+                theory_level_override,
+                dtype=torch.long,
+                device=batch.batch.device,
+            )
         output = model(
-            batch.to_dict(),
+            batch_dict,
             compute_stress=compute_stress,
             return_att=return_att,
+            return_descriptors=(
+                return_inv_descriptors or return_mean_inv_descriptors
+            ),
+            return_eqv_descriptors=(
+                return_eqv_descriptors or return_mean_eqv_descriptors
+            ),
         )
         energies = torch_tools.to_numpy(output["energy"])
 
@@ -153,6 +241,13 @@ def evaluate_model(
             )[:-1]
             hirshfeld_temp_list = [h for h in hirshfeld]
             hirshfeld_ratios_list += hirshfeld_temp_list
+        if compute_c6_ratios:
+            c6 = np.split(
+                torch_tools.to_numpy(output["c6_ratios"]),
+                indices_or_sections=batch.ptr[1:],
+                axis=0,
+            )[:-1]
+            c6_ratios_list += list(c6)
         if compute_partial_charges:
             partial_charges = torch_tools.to_numpy(output["partial_charges"])
             partial_charges = np.split(
@@ -187,6 +282,34 @@ def evaluate_model(
                     new_att_dict["receivers"] = receivers
                 att_scores_list.append(new_att_dict)
 
+        if return_inv_descriptors:
+            inv_desc = np.split(
+                torch_tools.to_numpy(output["inv_features"]),
+                indices_or_sections=batch.ptr[1:],
+                axis=0,
+            )[:-1]
+            inv_descriptors_list += [d for d in inv_desc]
+
+        if return_eqv_descriptors:
+            eqv_desc = np.split(
+                torch_tools.to_numpy(output["ev_features"]),
+                indices_or_sections=batch.ptr[1:],
+                axis=0,
+            )[:-1]
+            eqv_descriptors_list += [d for d in eqv_desc]
+
+        if return_mean_inv_descriptors:
+            inv_arr = torch_tools.to_numpy(output["inv_features"])
+            ptr = batch.ptr.cpu().numpy()
+            for i in range(len(ptr) - 1):
+                mean_inv_list.append(inv_arr[ptr[i] : ptr[i + 1]].mean(axis=0))
+
+        if return_mean_eqv_descriptors:
+            eqv_arr = torch_tools.to_numpy(output["ev_features"])
+            ptr = batch.ptr.cpu().numpy()
+            for i in range(len(ptr) - 1):
+                mean_eqv_list.append(eqv_arr[ptr[i] : ptr[i + 1]].mean(axis=0))
+
         forces = np.split(
             torch_tools.to_numpy(output["forces"]),
             indices_or_sections=batch.ptr[1:],
@@ -194,6 +317,16 @@ def evaluate_model(
         )[:-1]
         forces = [force for force in forces]
         forces_list += forces
+
+        if (batch_idx + 1) % log_every == 0 or batch_idx == n_batches - 1:
+            elapsed = time.perf_counter() - t0
+            rate = (batch_idx + 1) / elapsed
+            logger.info(
+                "  batch %d/%d  (%.1f batches/s)",
+                batch_idx + 1,
+                n_batches,
+                rate,
+            )
 
     if multi_species or multihead_model:
         energies = energies_list
@@ -204,6 +337,8 @@ def evaluate_model(
             dipoles = dipoles_list
         if compute_hirshfeld:
             hirshfeld = hirshfeld_ratios_list
+        if compute_c6_ratios:
+            c6_ratios = c6_ratios_list
         if compute_partial_charges:
             partial_charges = partial_charges_list
     else:
@@ -217,6 +352,8 @@ def evaluate_model(
             hirshfeld = np.stack(hirshfeld_ratios_list).reshape(
                 len(energies), -1, 1
             )
+        if compute_c6_ratios:
+            c6_ratios = np.stack(c6_ratios_list).reshape(len(energies), -1, 1)
         if compute_partial_charges:
             partial_charges = np.stack(partial_charges_list).reshape(
                 len(energies), -1, 1
@@ -228,10 +365,23 @@ def evaluate_model(
         "stresses": stresses if compute_stress else None,
         "dipoles": dipoles if compute_dipole else None,
         "hirshfeld_ratios": hirshfeld if compute_hirshfeld else None,
+        "c6_ratios": c6_ratios if compute_c6_ratios else None,
         "partial_charges": (
             partial_charges if compute_partial_charges else None
         ),
         "att_scores": (att_scores_list if return_att else None),
+        "inv_descriptors": (
+            inv_descriptors_list if return_inv_descriptors else None
+        ),
+        "eqv_descriptors": (
+            eqv_descriptors_list if return_eqv_descriptors else None
+        ),
+        "mean_inv_descriptors": (
+            np.stack(mean_inv_list) if return_mean_inv_descriptors else None
+        ),
+        "mean_eqv_descriptors": (
+            np.stack(mean_eqv_list) if return_mean_eqv_descriptors else None
+        ),
     }
 
     return results
@@ -246,13 +396,16 @@ def ensemble_prediction(
     batch_size: int = 1,
     multi_species: bool = False,
     multihead_model: bool = False,
-    r_max_lr: float = 12.0,
+    r_max_lr: Optional[float] = None,
     dispersion_energy_cutoff_lr_damping: Optional[float] = None,
     compute_stress: bool = False,
     compute_hirshfeld: bool = False,
+    compute_c6_ratios: bool = False,
     compute_dipole: bool = False,
     compute_partial_charges: bool = False,
-    key_spec: Optional[mace_data.utils.KeySpecification] = None,
+    key_spec: Optional[KeySpecification] = None,
+    compile: bool = False,
+    fullgraph: Optional[bool] = None,
 ) -> np.array:
     """
     Generate ensemble predictions for a list of ASE atoms objects using
@@ -266,7 +419,7 @@ def ensemble_prediction(
         models (list): List of trained models (torch.nn.Module objects).
         atoms_list (list): List of ASE atoms objects to evaluate on.
         device (str): Device to evaluate the models on (e.g., "cpu", "cuda").
-        model_type (str): Type of model ("so3lr", "so3krates", "mace").
+        model_type (str): Type of model ("so3lr", "so3krates").
         dtype (str, optional): Data type for model computations.
                               Defaults to "float64".
         batch_size (int, optional): Batch size for evaluation. Defaults to 1.
@@ -284,6 +437,12 @@ def ensemble_prediction(
                                         Defaults to False.
         compute_partial_charges (bool, optional): Whether to compute partial
                                                  charges. Defaults to False.
+        compile (bool, optional): Whether to compile each model with
+                                 `torch.compile` before evaluation.
+                                 Defaults to False.
+        fullgraph (bool, optional): Passed to `torch.compile` for each
+                                   model. Defaults to True on CUDA
+                                   devices and False otherwise.
 
     Returns:
         dict: Dictionary containing ensemble predictions with the following
@@ -312,15 +471,25 @@ def ensemble_prediction(
         all_stresses = []
     if compute_hirshfeld:
         all_hirshfeld = []
+    if compute_c6_ratios:
+        all_c6_ratios = []
     if compute_dipole:
         all_dipoles = []
     if compute_partial_charges:
         all_partial_charges = []
-    key_spec = (
-        mace_data.utils.KeySpecification() if key_spec is None else key_spec
-    )
-    i = 0
-    for model in models:
+    key_spec = KeySpecification() if key_spec is None else key_spec
+
+    # Resolve from representative model when not explicitly provided.
+    if r_max_lr is None:
+        r_max_lr = getattr(models[0], "r_max_lr", None)
+    if dispersion_energy_cutoff_lr_damping is None:
+        dispersion_energy_cutoff_lr_damping = getattr(
+            models[0], "dispersion_energy_cutoff_lr_damping", None
+        )
+
+    n_models = len(models)
+    for i, model in enumerate(models):
+        logger.info("ensemble_prediction: model %d/%d", i + 1, n_models)
         results = evaluate_model(
             atoms_list=atoms_list,
             model=model,
@@ -332,10 +501,13 @@ def ensemble_prediction(
             dispersion_energy_cutoff_lr_damping=dispersion_energy_cutoff_lr_damping,
             compute_stress=compute_stress,
             compute_hirshfeld=compute_hirshfeld,
+            compute_c6_ratios=compute_c6_ratios,
             compute_dipole=compute_dipole,
             compute_partial_charges=compute_partial_charges,
             dtype=dtype,
             key_spec=key_spec,
+            compile=compile,
+            fullgraph=fullgraph,
         )
         all_forces.append(results["forces"])
         all_energies.append(results["energies"])
@@ -343,11 +515,12 @@ def ensemble_prediction(
             all_stresses.append(results["stresses"])
         if compute_hirshfeld:
             all_hirshfeld.append(results["hirshfeld_ratios"])
+        if compute_c6_ratios:
+            all_c6_ratios.append(results["c6_ratios"])
         if compute_dipole:
             all_dipoles.append(results["dipoles"])
         if compute_partial_charges:
             all_partial_charges.append(results["partial_charges"])
-        i += 1
 
     if not multi_species and not multihead_model:
         # Stack for fixed-size molecules
@@ -370,6 +543,10 @@ def ensemble_prediction(
             all_hirshfeld = np.stack(all_hirshfeld).reshape(
                 (len(models), len(atoms_list), -1)
             )
+        if compute_c6_ratios:
+            all_c6_ratios = np.stack(all_c6_ratios).reshape(
+                (len(models), len(atoms_list), -1)
+            )
         if compute_partial_charges:
             all_partial_charges = np.stack(all_partial_charges).reshape(
                 (len(models), len(atoms_list), -1)
@@ -380,6 +557,7 @@ def ensemble_prediction(
         "forces": all_forces,
         "stresses": all_stresses if compute_stress else None,
         "hirshfeld_ratios": all_hirshfeld if compute_hirshfeld else None,
+        "c6_ratios": all_c6_ratios if compute_c6_ratios else None,
         "dipoles": all_dipoles if compute_dipole else None,
         "partial_charges": (
             all_partial_charges if compute_partial_charges else None
@@ -445,6 +623,20 @@ class ModelEval(Metric):
             "delta_hirshfeld_ratios_per_atom", default=[], dist_reduce_fx="cat"
         )
 
+        self.add_state(
+            "c6_ratios_computed",
+            default=torch.tensor(0.0),
+            dist_reduce_fx="sum",
+        )
+        self.add_state("delta_c6_ratios", default=[], dist_reduce_fx="cat")
+
+        self.add_state(
+            "charges_computed",
+            default=torch.tensor(0.0),
+            dist_reduce_fx="sum",
+        )
+        self.add_state("delta_charges", default=[], dist_reduce_fx="cat")
+
     def update(self, batch, output):  # pylint: disable=arguments-differ
         if self.loss_fn is not None:
             loss = self.loss_fn(pred=output, ref=batch)
@@ -481,14 +673,33 @@ class ModelEval(Metric):
             self.dipoles.append(batch.dipole)
             self.delta_dipoles.append(batch.dipole - output["dipole"])
 
-        if (
-            output.get("hirshfeld_ratios") is not None
-            and batch.hirshfeld_ratios is not None
+        # Ratio labels: only atoms with a usable label (finite, non-zero
+        # structure weight) count, matching the masked training loss.
+        for key, weight_key in (
+            ("hirshfeld_ratios", "hirshfeld_ratios_weight"),
+            ("c6_ratios", "c6_ratios_weight"),
         ):
-            self.hirshfeld_ratios_computed += 1.0
-            self.hirshfeld_ratios.append(batch.hirshfeld_ratios)
-            self.delta_hirshfeld_ratios.append(
-                batch.hirshfeld_ratios - output["hirshfeld_ratios"]
+            if output.get(key) is None or getattr(batch, key, None) is None:
+                continue
+            mask = ratio_label_mask(batch, key, weight_key)
+            if not bool(mask.any()):
+                continue
+            setattr(
+                self, f"{key}_computed", getattr(self, f"{key}_computed") + 1.0
+            )
+            if key == "hirshfeld_ratios":
+                self.hirshfeld_ratios.append(batch.hirshfeld_ratios[mask])
+            getattr(self, f"delta_{key}").append(
+                batch[key][mask] - output[key][mask]
+            )
+
+        if (
+            output.get("partial_charges") is not None
+            and batch.charges is not None
+        ):
+            self.charges_computed += 1.0
+            self.delta_charges.append(
+                batch.charges - output["partial_charges"]
             )
 
     def convert(
@@ -548,6 +759,18 @@ class ModelEval(Metric):
             aux["rmse_hirshfeld_ratios"] = compute_rmse(delta_hirshfeld_ratios)
             aux["q95_hirshfeld_ratios"] = compute_q95(delta_hirshfeld_ratios)
 
+        if self.c6_ratios_computed:
+            delta_c6_ratios = self.convert(self.delta_c6_ratios)
+            aux["mae_c6_ratios"] = compute_mae(delta_c6_ratios)
+            aux["rmse_c6_ratios"] = compute_rmse(delta_c6_ratios)
+            aux["q95_c6_ratios"] = compute_q95(delta_c6_ratios)
+
+        if self.charges_computed:
+            delta_charges = self.convert(self.delta_charges)
+            aux["mae_charges"] = compute_mae(delta_charges)
+            aux["rmse_charges"] = compute_rmse(delta_charges)
+            aux["q95_charges"] = compute_q95(delta_charges)
+
         if self.loss_fn is not None:
             return aux["loss"], aux
         else:
@@ -595,6 +818,8 @@ def test_model(
             predictions["dipole"] = []
         if output_args.get("hirshfeld_ratios", False):
             predictions["hirshfeld_ratios"] = []
+        if output_args.get("c6_ratios", False):
+            predictions["c6_ratios"] = []
 
     num_batches = len(data_loader)
     if log:
@@ -629,6 +854,8 @@ def test_model(
                 predictions["hirshfeld_ratios"].append(
                     output["hirshfeld_ratios"]
                 )
+            if output_args.get("c6_ratios", False):
+                predictions["c6_ratios"].append(output["c6_ratios"])
 
     aux = metrics.compute()
     aux["time"] = time.time() - start_time
@@ -662,11 +889,12 @@ def test_ensemble(
     virials_key: str = "REF_virials",
     dipole_key: str = "REF_dipole",
     hirshfeld_key: str = "REF_hirsh_ratios",
+    c6_key: str = "REF_c6_ratios",
     charges_key: str = "REF_charges",
     total_charge_key: str = "charge",
     total_spin_key: str = "spin",
     head_key: str = "head",
-    r_max_lr: float = 12.0,
+    r_max_lr: Optional[float] = None,
     log: bool = False,
 ) -> Tuple[dict, dict]:
     """
@@ -715,14 +943,12 @@ def test_ensemble(
     if atoms_list is not None:
         data_to_use = atoms_list
     elif path_to_data is not None:
-        from ase.io import read
-
         data_to_use = read(path_to_data, index=":")
     else:
         raise ValueError("Either atoms_list or path_to_data must be provided")
 
     # Create KeySpecification from the provided keys
-    keyspec = mace_data.utils.KeySpecification(
+    keyspec = KeySpecification(
         info_keys={
             "energy": energy_key,
             "dipole": dipole_key,
@@ -735,6 +961,7 @@ def test_ensemble(
             "stress": stress_key,
             "virials": virials_key,
             "hirshfeld_ratios": hirshfeld_key,
+            "c6_ratios": c6_key,
             "charges": charges_key,
         },
     )

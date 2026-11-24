@@ -25,7 +25,7 @@ def disable_e3nn_codegen():
 
 
 def prepare(func: ModuleFactory, allow_autograd: bool = True) -> ModuleFactory:
-    """Function transform that prepares a MACE module for torch.compile
+    """Function transform that prepares a module for torch.compile
 
     Args:
         func (ModuleFactory): A function that creates an nn.Module
@@ -45,7 +45,6 @@ def prepare(func: ModuleFactory, allow_autograd: bool = True) -> ModuleFactory:
         with disable_e3nn_codegen():
             model = func(*args, **kwargs)
 
-        # model = simplify(model)
         return model
 
     return wrapper

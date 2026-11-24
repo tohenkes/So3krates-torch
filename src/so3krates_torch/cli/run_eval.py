@@ -1,9 +1,49 @@
+"""``torchkrates-eval``: run a model over an ASE-readable dataset.
+
+``--model_path`` accepts (see ``run_evaluation`` below for details):
+  - a bundled pretrained keyword: ``v1``, ``v2-s``, ``v2-m``, ``v2-l``.
+  - a converted checkpoint: a ``<stem>.pt`` state_dict with a sibling
+    ``<stem>_settings.yaml`` (e.g. produced by ``torchkrates-jax2torch
+    --save_state_dict_path my_checkpoint.pt``, which also writes
+    ``my_checkpoint_settings.yaml``).
+  - a single pickled ``.model`` file, or a directory of them (original
+    behavior, produced by ``torchkrates-train``).
+
+Example invocations::
+
+    torchkrates-eval --model_path v1 --data_path my_data.xyz \\
+        --device cpu --dtype float32 --r_max_lr 12.0 \\
+        --dispersion_energy_cutoff_lr_damping 2.0 \\
+        --output_file results_v1.h5
+
+    torchkrates-eval --model_path my_checkpoint.pt \\
+        --data_path my_data.xyz --device cpu --dtype float32 \\
+        --output_file results_my_checkpoint.h5
+
+``torchkrates-metric --models ...`` accepts the same two new forms.
+"""
+
 import argparse
+import logging
+from typing import Optional
+
+from so3krates_torch.config import EvalArgs
+from so3krates_torch.data.hdf5_utils import load_atoms_from_hdf5
 from so3krates_torch.tools.eval import evaluate_model, ensemble_prediction
-from so3krates_torch.tools.utils import save_results_hdf5
+from so3krates_torch.tools.utils import save_results_hdf5, save_results_xyz
+from so3krates_torch.tools.load_descriptors import (
+    save_descriptors_hdf5,
+    save_mean_descriptors_npz,
+)
 from ase.io import read
 import torch
-from mace import data as mace_data
+from so3krates_torch.calculator.so3 import (
+    _PRETRAINED_SO3LR_MODELS,
+    _build_so3lr_from_settings_and_state_dict,
+    load_pretrained_so3lr,
+    settings_path_for_checkpoint,
+)
+from so3krates_torch.data.utils import KeySpecification
 from pathlib import Path
 import os
 
@@ -14,14 +54,15 @@ def run_evaluation(
     device: str = "cuda",
     batch_size: int = 5,
     model_type: str = "so3lr",
-    r_max_lr: float = 12.0,
+    r_max_lr: Optional[float] = None,
     multispecies: bool = False,
     multihead_model: bool = False,
     compute_dipole: bool = False,
     compute_stress: bool = False,
     compute_hirshfeld: bool = False,
+    compute_c6_ratios: bool = False,
     compute_partial_charges: bool = False,
-    dispersion_energy_cutoff_lr_damping: float = 2.0,
+    dispersion_energy_cutoff_lr_damping: Optional[float] = None,
     energy_key: str = "REF_energy",
     forces_key: str = "REF_forces",
     stress_key: str = "REF_stress",
@@ -31,13 +72,31 @@ def run_evaluation(
     total_charge_key: str = "charge",
     total_spin_key: str = "total_spin",
     hirshfeld_key: str = "REF_hirsh_ratios",
+    c6_key: str = "REF_c6_ratios",
     head_key: str = "head",
     dtype: str = "float32",
     return_att: bool = False,
+    return_inv_descriptors: bool = False,
+    return_eqv_descriptors: bool = False,
+    return_mean_inv_descriptors: bool = False,
+    return_mean_eqv_descriptors: bool = False,
+    compile: bool = False,
+    fullgraph: Optional[bool] = None,
 ):
-    """Load models from `model_path` (single .model or directory of .model),
-    read data from `data_path`, run evaluation or ensemble prediction and
-    return (result, is_ensemble).
+    """Load models from `model_path`, read data from `data_path`, run
+    evaluation or ensemble prediction and return (result, is_ensemble).
+
+    `model_path` accepts:
+      - one of the 4 bundled pretrained keywords (``"v1"``, ``"v2-s"``,
+        ``"v2-m"``, ``"v2-l"``) -- loaded via ``load_pretrained_so3lr``.
+      - a path ending in ``.pt`` -- a raw ``state_dict`` checkpoint with
+        a sibling ``<stem>_settings.yaml`` (same convention as the
+        bundled checkpoints), constructed+loaded via the same shared
+        helper as ``load_pretrained_so3lr``.
+      - a single ``.model`` file (a pickled whole-model object, as
+        produced by training) -- unchanged original behavior.
+      - a directory -- globbed for ``*.model`` files and loaded as an
+        ensemble -- unchanged original behavior.
 
     This function mirrors the original inline logic but uses explicit
     function arguments instead of relying on an argparse Namespace.
@@ -51,22 +110,50 @@ def run_evaluation(
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
 
-    # check if path ends with .model or is dir
-    if model_path.endswith(".model"):
-        model_paths = [model_path]
-    else:
-        model_paths = list(Path(model_path).glob("*.model"))
+    torch_dtype = torch.float32 if dtype == "float32" else torch.float64
 
-    models = []
-    for mp in model_paths:
-        model = torch.load(mp, map_location=device, weights_only=False).to(
-            torch.float32 if dtype == "float32" else torch.float64
+    if model_path in _PRETRAINED_SO3LR_MODELS:
+        model = load_pretrained_so3lr(model_path, device=device).to(
+            torch_dtype
         )
         model.return_mean = False
-        models.append(model)
+        models = [model]
+    elif model_path.endswith(".pt"):
+        settings_path = settings_path_for_checkpoint(model_path)
+        model = _build_so3lr_from_settings_and_state_dict(
+            settings_path, model_path, device=device
+        ).to(torch_dtype)
+        model.return_mean = False
+        models = [model]
+    else:
+        # check if path ends with .model or is dir
+        if model_path.endswith(".model"):
+            model_paths = [model_path]
+        else:
+            model_paths = list(Path(model_path).glob("*.model"))
 
-    data = read(data_path, index=":")
-    keyspec = mace_data.utils.KeySpecification(
+        models = []
+        for mp in model_paths:
+            model = torch.load(mp, map_location=device, weights_only=False).to(
+                torch_dtype
+            )
+            model.return_mean = False
+            models.append(model)
+    logging.info("Loaded %d model(s) from %s", len(models), model_path)
+
+    data_suffix = Path(data_path).suffix.lower()
+    if data_suffix in {".h5", ".hdf5"}:
+        # Required eval behavior: load full raw HDF5 dataset at once.
+        data = load_atoms_from_hdf5(data_path, index=None)
+    elif data_suffix in {".xyz", ".extxyz"}:
+        data = read(data_path, index=":")
+    else:
+        raise ValueError(
+            "Unsupported data format. Use .xyz/.extxyz or raw .h5/.hdf5 "
+            f"input files, got: {data_path}"
+        )
+    logging.info("Loaded %d structures from %s", len(data), data_path)
+    keyspec = KeySpecification(
         info_keys={
             "energy": energy_key,
             "dipole": dipole_key,
@@ -79,10 +166,12 @@ def run_evaluation(
             "stress": stress_key,
             "virials": virials_key,
             "hirshfeld_ratios": hirshfeld_key,
+            "c6_ratios": c6_key,
             "charges": charges_key,
         },
     )
 
+    logging.info("Running evaluation ...")
     if len(models) == 1:
         model = models[0]
         result = evaluate_model(
@@ -99,9 +188,16 @@ def run_evaluation(
             compute_stress=compute_stress,
             compute_dipole=compute_dipole,
             compute_hirshfeld=compute_hirshfeld,
+            compute_c6_ratios=compute_c6_ratios,
             compute_partial_charges=compute_partial_charges,
             return_att=return_att,
+            return_inv_descriptors=return_inv_descriptors,
+            return_eqv_descriptors=return_eqv_descriptors,
+            return_mean_inv_descriptors=return_mean_inv_descriptors,
+            return_mean_eqv_descriptors=return_mean_eqv_descriptors,
             key_spec=keyspec,
+            compile=compile,
+            fullgraph=fullgraph,
         )
     else:
         result = ensemble_prediction(
@@ -117,15 +213,23 @@ def run_evaluation(
             compute_stress=compute_stress,
             compute_dipole=compute_dipole,
             compute_hirshfeld=compute_hirshfeld,
+            compute_c6_ratios=compute_c6_ratios,
             compute_partial_charges=compute_partial_charges,
             key_spec=keyspec,
+            compile=compile,
+            fullgraph=fullgraph,
         )
 
+    logging.info("Evaluation complete.")
     return result, len(models) > 1
 
 
 def main():
-
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--model_path", type=str, required=True)
     argparser.add_argument("--data_path", type=str, required=True)
@@ -151,10 +255,16 @@ def main():
         "--compute_hirshfeld", action="store_true", default=False
     )
     argparser.add_argument(
+        "--compute_c6_ratios",
+        action="store_true",
+        default=False,
+        help="Export per-atom C6-ratio predictions (SO3LR-tauri models)",
+    )
+    argparser.add_argument(
         "--compute_partial_charges", action="store_true", default=False
     )
     argparser.add_argument(
-        "--dispersion_energy_cutoff_lr_damping", type=float, default=2.0
+        "--dispersion_energy_cutoff_lr_damping", type=float, default=None
     )
     argparser.add_argument(
         "--energy_key", type=str, help="Energy key", default="REF_energy"
@@ -193,42 +303,119 @@ def main():
         default="REF_hirsh_ratios",
     )
     argparser.add_argument(
+        "--c6_key",
+        type=str,
+        help="C6-ratio key",
+        default="REF_c6_ratios",
+    )
+    argparser.add_argument(
         "--head_key", type=str, help="Head key", default="head"
     )
     argparser.add_argument("--head", type=str, help="Head key", default="head")
     argparser.add_argument("--dtype", type=str, default="float32")
     argparser.add_argument("--return_att", action="store_true")
-    args = argparser.parse_args()
-    # turn all args into variables
-    model_path = args.model_path
-    data_path = args.data_path
-    output_file = args.output_file
-    ensemble_size = args.ensemble_size
-    device = args.device
-    batch_size = args.batch_size
-    model_type = args.model_type
-    r_max_lr = args.r_max_lr
-    multispecies = args.multispecies
-    multihead_model = args.multihead_model
-    compute_dipole = args.compute_dipole
-    compute_stress = args.compute_stress
-    compute_hirshfeld = args.compute_hirshfeld
-    compute_partial_charges = args.compute_partial_charges
-    dispersion_energy_cutoff_lr_damping = (
-        args.dispersion_energy_cutoff_lr_damping
+    argparser.add_argument(
+        "--return_inv_descriptors",
+        action="store_true",
+        help=(
+            "If set, compute and save invariant (scalar) per-atom "
+            "descriptors to the output file."
+        ),
     )
-    energy_key = args.energy_key
-    forces_key = args.forces_key
-    stress_key = args.stress_key
-    virials_key = args.virials_key
-    dipole_key = args.dipole_key
-    charges_key = args.charges_key
-    total_charge_key = args.total_charge_key
-    total_spin_key = args.total_spin_key
-    hirshfeld_key = args.hirshfeld_key
-    head_key = args.head_key
-    dtype = args.dtype
-    return_att = args.return_att
+    argparser.add_argument(
+        "--return_eqv_descriptors",
+        action="store_true",
+        help=(
+            "If set, compute and save equivariant (spherical-harmonic) "
+            "per-atom descriptors to the output file."
+        ),
+    )
+    argparser.add_argument(
+        "--return_mean_inv_descriptors",
+        action="store_true",
+        help=("Compute and save per-structure mean invariant descriptors."),
+    )
+    argparser.add_argument(
+        "--return_mean_eqv_descriptors",
+        action="store_true",
+        help=("Compute and save per-structure mean equivariant descriptors."),
+    )
+    argparser.add_argument(
+        "--mean_descriptors_only",
+        action="store_true",
+        default=False,
+        help=(
+            "Save only mean descriptors as an uncompressed .npz file "
+            "and skip writing forces/energies. Requires "
+            "--return_mean_inv_descriptors or "
+            "--return_mean_eqv_descriptors."
+        ),
+    )
+    argparser.add_argument(
+        "--output_prefix",
+        type=str,
+        default="SO3",
+        help="Prefix for predicted property names in XYZ output "
+        "(default: 'SO3', giving SO3_energy, SO3_forces, …)",
+    )
+    argparser.add_argument(
+        "--compile",
+        action="store_true",
+        default=False,
+        help="EXPERIMENTAL. Compile the model with torch.compile "
+        "(dynamic=True) before evaluation.",
+    )
+    argparser.add_argument(
+        "--fullgraph",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Passed to torch.compile when --compile is set. Defaults "
+        "to True on CUDA devices and False otherwise (CPU compilation "
+        "of the long-range terms currently crashes Inductor's C++ "
+        "backend regardless of fullgraph). Use --no-fullgraph/"
+        "--fullgraph to force one way or the other.",
+    )
+    args = argparser.parse_args()
+    validated = EvalArgs.model_validate(vars(args))
+    # turn all args into variables
+    model_path = validated.model_path
+    data_path = validated.data_path
+    output_file = validated.output_file
+    device = validated.device
+    batch_size = validated.batch_size
+    model_type = validated.model_type
+    r_max_lr = validated.r_max_lr
+    multispecies = validated.multispecies
+    multihead_model = validated.multihead_model
+    compute_dipole = validated.compute_dipole
+    compute_stress = validated.compute_stress
+    compute_hirshfeld = validated.compute_hirshfeld
+    compute_c6_ratios = validated.compute_c6_ratios
+    compute_partial_charges = validated.compute_partial_charges
+    dispersion_energy_cutoff_lr_damping = (
+        validated.dispersion_energy_cutoff_lr_damping
+    )
+    energy_key = validated.energy_key
+    forces_key = validated.forces_key
+    stress_key = validated.stress_key
+    virials_key = validated.virials_key
+    dipole_key = validated.dipole_key
+    charges_key = validated.charges_key
+    total_charge_key = validated.total_charge_key
+    total_spin_key = validated.total_spin_key
+    hirshfeld_key = validated.hirshfeld_key
+    c6_key = validated.c6_key
+    head_key = validated.head_key
+    dtype = validated.dtype
+    return_att = validated.return_att
+    return_inv_descriptors = validated.return_inv_descriptors
+    return_eqv_descriptors = validated.return_eqv_descriptors
+    return_mean_inv_descriptors = validated.return_mean_inv_descriptors
+    return_mean_eqv_descriptors = validated.return_mean_eqv_descriptors
+    mean_descriptors_only = validated.mean_descriptors_only
+    output_prefix = validated.output_prefix
+    compile_model = validated.compile
+    fullgraph = validated.fullgraph
 
     result, is_ensemble = run_evaluation(
         model_path=model_path,
@@ -242,6 +429,7 @@ def main():
         compute_stress=compute_stress,
         compute_dipole=compute_dipole,
         compute_hirshfeld=compute_hirshfeld,
+        compute_c6_ratios=compute_c6_ratios,
         compute_partial_charges=compute_partial_charges,
         dispersion_energy_cutoff_lr_damping=dispersion_energy_cutoff_lr_damping,
         energy_key=energy_key,
@@ -253,17 +441,46 @@ def main():
         total_charge_key=total_charge_key,
         total_spin_key=total_spin_key,
         hirshfeld_key=hirshfeld_key,
+        c6_key=c6_key,
         head_key=head_key,
         dtype=dtype,
         return_att=return_att,
+        return_inv_descriptors=return_inv_descriptors,
+        return_eqv_descriptors=return_eqv_descriptors,
+        return_mean_inv_descriptors=return_mean_inv_descriptors,
+        return_mean_eqv_descriptors=return_mean_eqv_descriptors,
+        compile=compile_model,
+        fullgraph=fullgraph,
     )
     extension = os.path.splitext(output_file)[1].lower()
-    if extension == ".h5" or extension == ".hdf5" or extension == "":
+    if mean_descriptors_only:
+        mean_inv_desc = result.get("mean_inv_descriptors")
+        mean_eqv_desc = result.get("mean_eqv_descriptors")
+        npz_path = str(Path(output_file).with_suffix(".npz"))
+        save_mean_descriptors_npz(
+            npz_path,
+            mean_inv=mean_inv_desc,
+            mean_eqv=mean_eqv_desc,
+        )
+    elif extension == ".h5" or extension == ".hdf5" or extension == "":
+        inv_desc = result.pop("inv_descriptors", None)
+        eqv_desc = result.pop("eqv_descriptors", None)
+        mean_inv_desc = result.pop("mean_inv_descriptors", None)
+        mean_eqv_desc = result.pop("mean_eqv_descriptors", None)
         save_results_hdf5(result, output_file, is_ensemble=is_ensemble)
+        if any(
+            x is not None
+            for x in [inv_desc, eqv_desc, mean_inv_desc, mean_eqv_desc]
+        ):
+            save_descriptors_hdf5(
+                output_file,
+                inv=inv_desc,
+                eqv=eqv_desc,
+                mean_inv=mean_inv_desc,
+                mean_eqv=mean_eqv_desc,
+            )
     elif is_ensemble == False and extension == ".xyz":
-        from so3krates_torch.tools.utils import save_results_xyz
-
-        save_results_xyz(data_path, result, output_file)
+        save_results_xyz(data_path, result, output_file, prefix=output_prefix)
     else:
         raise ValueError(
             f"Unsupported output file format: {extension} or ensemble results cannot be saved in .xyz"

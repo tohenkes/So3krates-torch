@@ -1,3 +1,4 @@
+from so3krates_torch.config import Torch2JaxArgs
 from so3krates_torch.tools.jax_torch_conversion import convert_torch_to_flax
 import argparse
 import yaml
@@ -8,7 +9,6 @@ from pathlib import Path
 
 
 def main():
-
     argparser = argparse.ArgumentParser(
         description="Convert between Flax and PyTorch model formats"
     )
@@ -61,8 +61,34 @@ def main():
         default="float32",
         help="Data type to use for the model parameters",
     )
+    argparser.add_argument(
+        "--check_parity",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Verify JAX/Torch model outputs agree after conversion",
+    )
+    argparser.add_argument(
+        "--parity_structure",
+        type=str,
+        default=None,
+        help="Structure file to check parity on (default: bundled example)",
+    )
+    argparser.add_argument(
+        "--parity_atol",
+        type=float,
+        default=1e-5,
+        help="Absolute tolerance for the parity check",
+    )
+    argparser.add_argument(
+        "--parity_rtol",
+        type=float,
+        default=1e-4,
+        help="Relative tolerance for the parity check",
+    )
 
     args = argparser.parse_args()
+    validated = Torch2JaxArgs.model_validate(vars(args))
+
     path_to_settings_dir = Path(args.save_settings_path)
     path_to_params_dir = Path(args.save_params_path)
     # check if the directories exist, if not create them
@@ -70,12 +96,6 @@ def main():
         path_to_settings_dir.mkdir(parents=True, exist_ok=True)
     if args.save_params_path:
         path_to_params_dir.mkdir(parents=True, exist_ok=True)
-
-    # assert that either save_settings_path or save_state_dict_path or save_model_path is provided
-    assert (
-        args.save_settings_path is not None
-        or args.save_params_path is not None
-    ), "At least one of --save_settings_path or --save_params_path must be provided"
 
     with open(args.path_to_hyperparams, "r") as f:
         torch_settings = yaml.safe_load(f)
@@ -87,6 +107,7 @@ def main():
     cfg, params = convert_torch_to_flax(
         torch_state_dict=state_dict,
         torch_settings=torch_settings["ARCHITECTURE"],
+        trainable_rbf=args.trainable_rbf,
         dtype=args.dtype,
     )
 
@@ -98,6 +119,43 @@ def main():
     if args.save_params_path:
         with open(path_to_params_dir / "params.pkl", "wb") as f:
             pickle.dump(params, f)
+
+    if args.check_parity:
+        from so3krates_torch.modules.models import SO3LR, So3krates
+        from so3krates_torch.tools.model_parity import check_model_parity
+
+        arch_settings = dict(torch_settings["ARCHITECTURE"])
+        # `arch_settings["dtype"]`, if present, may be a string like
+        # "torch.float64" (as written by `convert_flax_to_torch`'s own
+        # `save_torch_settings` option -- see jax_torch_conversion.py's
+        # `serializable_settings["dtype"] = str(dtype)`), which
+        # `So3krates.__init__`'s `getattr(torch, dtype)` string-handling
+        # cannot parse (it expects a bare "float64", no "torch." prefix).
+        # Override with the CLI's own already-validated --dtype instead
+        # of trying to parse whatever string format happens to be in the
+        # file.
+        arch_settings["dtype"] = getattr(torch, args.dtype, torch.float32)
+
+        check_model = (SO3LR if args.so3lr else So3krates)(**arch_settings)
+        check_model.load_state_dict(state_dict)
+
+        parity_ok = check_model_parity(
+            cfg=cfg,
+            flax_params=params,
+            torch_model=check_model,
+            r_max=arch_settings["r_max"],
+            r_max_lr=arch_settings.get("r_max_lr"),
+            structure_path=args.parity_structure,
+            atol=args.parity_atol,
+            rtol=args.parity_rtol,
+        )
+        if not parity_ok:
+            print(
+                "WARNING: JAX<->Torch parity check FAILED -- the converted "
+                "params were still saved, but their outputs do not match "
+                "the source model within tolerance. See the table above."
+            )
+            return 1
 
     return 0
 

@@ -3,43 +3,16 @@ from typing import Callable, List, Dict, Optional
 import torch.nn as nn
 import itertools as it
 import numpy as np
-import pkg_resources
-from so3krates_torch.tools.scatter import scatter_sum
-
-
-class SO3ConvolutionInvariants(torch.nn.Module):
-    def __init__(
-        self,
-        degrees: List[int],
-    ):
-        super().__init__()
-        import e3nn.o3 as o3
-
-        irreps_list = []
-        for l in degrees:
-            standard_parity = "e" if l % 2 == 0 else "o"
-            irreps_list.append(o3.Irrep(f"{l}{standard_parity}"))
-        self.irreps_in = o3.Irreps(irreps_list)
-        self.tensor_product = o3.FullTensorProduct(
-            self.irreps_in,
-            self.irreps_in,
-            filter_ir_out=["0e"],
-            internal_weights=False,
-        )
-
-    def forward(
-        self, ev_features_1: torch.Tensor, ev_features_2: torch.Tensor
-    ) -> torch.Tensor:
-
-        return self.tensor_product(ev_features_1, ev_features_2)
-
+import importlib.resources
 
 indx_fn = lambda x: int((x + 1) ** 2) if x >= 0 else 0
 
 
 def load_cgmatrix():
-    stream = pkg_resources.resource_stream(__name__, "cgmatrix.npz")
-    return np.load(stream)["cg"]
+    """Load the precomputed Clebsch-Gordan matrix from the bundled resource file."""
+    ref = importlib.resources.files(__package__).joinpath("cgmatrix.npz")
+    with importlib.resources.as_file(ref) as path:
+        return np.load(path)["cg"]
 
 
 def init_clebsch_gordan_matrix(degrees, l_out_max=0):
@@ -95,6 +68,15 @@ class L0Contraction(nn.Module):
             torch.tensor(segment_ids, dtype=torch.long, device=device),
         )
 
+        # Segment sum matrix for efficient matmul
+        m_tot = len(segment_ids)
+        S = torch.zeros(m_tot, self.num_segments, dtype=dtype, device=device)
+        S[
+            torch.arange(m_tot, device=device),
+            self.segment_ids,
+        ] = 1.0
+        self.register_buffer("segment_sum_matrix", S)
+
     def forward(self, sphc: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -102,17 +84,18 @@ class L0Contraction(nn.Module):
         Returns:
             shape (B, len(degrees))
         """
-        B, m_tot = sphc.shape
-        weighted = sphc * sphc * self.cg_rep[None, :]  # (B, m_tot)
-
-        flat = weighted.reshape(-1)
-        batch_ids = torch.arange(B, device=sphc.device).repeat_interleave(
-            m_tot
-        )
-        seg_ids = self.segment_ids.repeat(B)
-        scatter_ids = batch_ids * self.num_segments + seg_ids
-
-        out = scatter_sum(
-            flat, index=scatter_ids, dim=0, dim_size=B * self.num_segments
-        )
-        return out.view(B, self.num_segments)
+        if not hasattr(self, "segment_sum_matrix"):
+            m = self.segment_ids.shape[0]
+            S = torch.zeros(
+                m,
+                self.num_segments,
+                dtype=self.cg_rep.dtype,
+                device=self.cg_rep.device,
+            )
+            S[
+                torch.arange(m, device=S.device),
+                self.segment_ids,
+            ] = 1.0
+            self.register_buffer("segment_sum_matrix", S)
+        weighted = sphc * sphc * self.cg_rep
+        return weighted @ self.segment_sum_matrix.to(weighted.dtype)

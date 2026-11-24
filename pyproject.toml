@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "So3krates-torch"
-version = "0.1"
+version = "0.3.0"
 description = "PyTorch implementation of So3krates neural network potential for atomistic simulations"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "MIT (code); bundled SO3LR tauri weights CC-BY-NC-4.0, robust loss Apache-2.0 (see NOTICE.md)" }
 authors = [
     { name = "Tobias Henkes", email = "tobias.henkes@uni.lu" }
 ]
@@ -41,32 +41,50 @@ classifiers = [
 dependencies = [
     "ase>=3.26.0",
     "h5py>=3.14.0",
-    "mace-torch>=0.3.14",
+    "matscipy>=0.8.0",
     "numpy>=1.26.4",
+    "prettytable>=3.0.0",
+    "pydantic>=2.0",
     "pyyaml>=6.0.2",
-    "torch>=2.8.0",
-    "torchvision>=0.23.0",
-    "torchaudio>=2.8.0",
+    "torch>=2.6.0",
+    "torch-ema>=0.3.0",
     "torch-geometric==2.7.0",
+    "torchmetrics>=1.0.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pre-commit", "pytest"]
+pme = ["torch-pme>=0.5"]
+slurm = ["python-hostlist"]
+jax = ["jax", "flax", "ml-collections"]
+vis = ["matplotlib>=3.5.0", "pandas>=1.5.0"]
+nvalchemi = ["nvalchemi-toolkit[ase]>=0.2,<0.4; python_version >= '3.11'"]
 
 [project.urls]
 homepage = "https://github.com/tohenkes/So3krates-torch"
 repository = "https://github.com/tohenkes/So3krates-torch"
 documentation = "https://github.com/tohenkes/So3krates-torch#readme"
-changelog = "https://github.com/tohenkes/So3krates-torch/blob/main/CHANGELOG.md"
 issues = "https://github.com/tohenkes/So3krates-torch/issues"
 "Bug Reports" = "https://github.com/tohenkes/So3krates-torch/issues"
 "Source Code" = "https://github.com/tohenkes/So3krates-torch"
+
+[tool.setuptools]
+# Ship third-party license texts (Apache-2.0 robust loss, CC BY-NC 4.0
+# tauri weights) with the wheel; see NOTICE.md.
+license-files = ["LICENSE.md", "NOTICE.md", "licenses/*"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-so3krates_torch = ["pretrained/so3lr/so3lr.model"]
+so3krates_torch = [
+    "pretrained/so3lr/v1/*.pt",
+    "pretrained/so3lr/v1/*.yaml",
+    "pretrained/so3lr/tauri/*.pt",
+    "pretrained/so3lr/tauri/*.yaml",
+]
+"so3krates_torch.blocks" = ["cgmatrix.npz", "nhl_tables.npz"]
+"so3krates_torch.modules.robust_loss" = ["data/*.npz", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/so3krates_torch/tests"]
@@ -78,3 +96,8 @@ torchkrates-torch2jax = "so3krates_torch.cli.torch_to_jax:main"
 torchkrates-eval = "so3krates_torch.cli.run_eval:main"
 torchkrates-metric = "so3krates_torch.cli.run_metric:main"
 torchkrates-train = "so3krates_torch.cli.run_train:main"
+torchkrates-preprocess = "so3krates_torch.cli.run_preprocess:main"
+torchkrates-create-lammps-model = "so3krates_torch.cli.create_lammps_model:main"
+torchkrates-merge = "so3krates_torch.cli.run_merge:main"
+torchkrates-tune-pme = "so3krates_torch.cli.run_tune_pme:main"
+torchkrates-md-nvalchemi = "so3krates_torch.cli.run_md_nvalchemi:main"

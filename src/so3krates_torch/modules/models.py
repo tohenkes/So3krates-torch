@@ -13,13 +13,19 @@ from so3krates_torch.blocks.output_block import (
     PartialChargesOutputHead,
     DipoleVecOutputHead,
     HirshfeldOutputHead,
+    SimpleHirshfeldOutputHead,
+    C6RatiosOutputHead,
 )
 from so3krates_torch.blocks import radial_basis
 import math
 from so3krates_torch.blocks.physical_potentials import (
     ZBLRepulsion,
+    NHLRepulsion,
     ElectrostaticInteraction,
     DispersionInteraction,
+    PMEElectrostaticInteraction,
+    PMEDispersionInteraction,
+    atomic_c6_pseudo_charges,
 )
 from so3krates_torch.tools import scatter
 from so3krates_torch.tools import utils
@@ -47,12 +53,15 @@ class So3krates(torch.nn.Module):
         energy_learn_atomic_type_scales: bool = False,
         layer_normalization_1: bool = False,
         layer_normalization_2: bool = False,
+        use_rms_norm: bool = False,
         residual_mlp_1: bool = False,
         residual_mlp_2: bool = False,
         use_charge_embed: bool = False,
         use_spin_embed: bool = False,
         interaction_bias: bool = True,
         qk_non_linearity: str = "identity",
+        qk_norm: bool = False,
+        use_residual_scalars: bool = False,
         cutoff_fn: str = "cosine",
         cutoff_p: int = 5,
         activation_fn: str = "silu",
@@ -66,6 +75,8 @@ class So3krates(torch.nn.Module):
         num_features_head: Optional[
             int
         ] = None,  # not used; just for compatibility with jax version
+        final_layer_bias: bool = True,
+        num_theory_levels: int = 1,
     ):
         super().__init__()
 
@@ -88,7 +99,6 @@ class So3krates(torch.nn.Module):
         if isinstance(dtype, str):
             dtype = getattr(torch, dtype)
         torch.set_default_dtype(dtype)
-        torch.manual_seed(seed)
 
         # Store all constructor arguments as model attributes
         self.r_max = r_max
@@ -112,12 +122,15 @@ class So3krates(torch.nn.Module):
         self.energy_learn_atomic_type_scales = energy_learn_atomic_type_scales
         self.layer_normalization_1 = layer_normalization_1
         self.layer_normalization_2 = layer_normalization_2
+        self.use_rms_norm = use_rms_norm
         self.residual_mlp_1 = residual_mlp_1
         self.residual_mlp_2 = residual_mlp_2
         self.use_charge_embed = use_charge_embed
         self.use_spin_embed = use_spin_embed
         self.interaction_bias = interaction_bias
         self.qk_non_linearity = qk_non_linearity
+        self.qk_norm = qk_norm
+        self.use_residual_scalars = use_residual_scalars
         self.cutoff_fn_name = cutoff_fn
         self.cutoff_p = cutoff_p
         self.activation_fn_name = activation_fn
@@ -197,21 +210,33 @@ class So3krates(torch.nn.Module):
                     avg_num_neighbors=self.avg_num_neighbors,
                     layer_normalization_1=self.layer_normalization_1,
                     layer_normalization_2=self.layer_normalization_2,
+                    use_rms_norm=self.use_rms_norm,
                     residual_mlp_1=self.residual_mlp_1,
                     residual_mlp_2=self.residual_mlp_2,
                     activation_fn=self.activation_fn,
                     qk_non_linearity=qk_non_linearity,
+                    qk_norm=self.qk_norm,
                     device=self.device,
                 )
                 for _ in range(self.num_layers)
             ]
         )
+        if self.use_residual_scalars:
+            # JAX stacknet_sparse.py: resid_lambdas init to 1.0,
+            # x0_lambdas init to 0.1, one scalar per layer.
+            self.resid_lambdas = torch.nn.Parameter(
+                torch.ones(self.num_layers)
+            )
+            self.x0_lambdas = torch.nn.Parameter(
+                torch.full((self.num_layers,), 0.1)
+            )
         self.atomic_energy_output_block = AtomicEnergyOutputHead(
             num_features=self.num_features,
             energy_regression_dim=self.energy_regression_dim,
-            final_output_features=1,  # TODO: remove hardcoded value
+            final_output_features=1,  # scalar energy per atom
             layers=self.final_mlp_layers,
             bias=True,
+            final_layer_bias=final_layer_bias,
             non_linearity=self.energy_activation_fn,
             final_non_linearity=False,
             use_non_linearity=True,
@@ -219,8 +244,40 @@ class So3krates(torch.nn.Module):
             energy_learn_atomic_type_shifts=self.energy_learn_atomic_type_shifts,
             energy_learn_atomic_type_scales=self.energy_learn_atomic_type_scales,
             num_elements=self.num_elements,
+            num_theory_levels=num_theory_levels,
             device=self.device,
         )
+
+    def load_state_dict(self, state_dict, strict=True):
+        """
+        Load state dict with backward compatibility for models saved before
+        degree_repeats and vera_* matrices were converted to buffers.
+        """
+        # Check if state dict is missing the new buffer keys
+        missing_buffer_keys = [
+            key
+            for key in self.state_dict().keys()
+            if "degree_repeats" in key
+            or "vera_" in key
+            or "resid_lambdas" in key
+            or "x0_lambdas" in key
+        ]
+
+        has_missing_buffers = any(
+            key not in state_dict for key in missing_buffer_keys
+        )
+
+        if has_missing_buffers and strict:
+            # Old state dict detected - load with strict=False
+            # The missing buffers are already initialized correctly in __init__
+            print(
+                "Loading old state dict format (missing degree_repeats/vera buffers). "
+                "Using strict=False to skip non-trainable computed buffers."
+            )
+            return super().load_state_dict(state_dict, strict=False)
+        else:
+            # New state dict or strict=False explicitly requested
+            return super().load_state_dict(state_dict, strict=strict)
 
     def _get_graph(
         self,
@@ -252,7 +309,6 @@ class So3krates(torch.nn.Module):
         lammps_mliap: bool = False,
         return_att: bool = False,
     ):
-
         self._get_graph(
             data=data,
             compute_virials=compute_virials,
@@ -305,6 +361,11 @@ class So3krates(torch.nn.Module):
             inv_features += spin_embedding
         # never mentionend in the paper, but done in the JAX code ...
         inv_features /= self.embedding_scale
+        x0 = (
+            inv_features.clone()
+            if getattr(self, "use_residual_scalars", False)
+            else None
+        )
         ev_features = self.ev_embedding(
             sh_vectors=sh_vectors,
             cutoffs=self.cutoffs,
@@ -316,9 +377,32 @@ class So3krates(torch.nn.Module):
         rbf = self.radial_embedding(self.lengths)
 
         ######### TRANSFORMER #########
+        n_real = self.lammps_natoms[0] if self.is_lammps else 0
+        n_total = self.lammps_natoms[1] if self.is_lammps else 0
+        has_ghosts = self.is_lammps and n_total > n_real
+
         if return_att:
             att_scores = {"inv": {}, "ev": {}}
         for layer_idx, transformer in enumerate(self.euclidean_transformers):
+            # Sync ghost atom features before each layer (except the first,
+            # where all n_total features are already correct from embedding).
+            # After each layer we truncate to n_real; here we pad back to
+            # n_total and use LAMMPS reverse-communication to copy the real
+            # atom features into their ghost copies.
+            if has_ghosts and layer_idx > 0:
+                inv_features = self._lammps_pad_and_sync(inv_features)
+                ev_features = self._lammps_pad_and_sync(ev_features)
+
+            if getattr(self, "use_residual_scalars", False):
+                # JAX stacknet_sparse.py: before every layer (including
+                # layer 0), mix in the initial embedding x0 via learnable
+                # per-layer scalars. Only the invariant stream is scaled;
+                # ev_features is untouched.
+                inv_features = (
+                    self.resid_lambdas[layer_idx] * inv_features
+                    + self.x0_lambdas[layer_idx] * x0
+                )
+
             transformer_output = transformer(
                 inv_features=inv_features,
                 ev_features=ev_features,
@@ -330,19 +414,57 @@ class So3krates(torch.nn.Module):
                 return_att=return_att,
             )
             if return_att:
-                (inv_features, ev_features, (alpha_inv, alpha_ev)) = (
-                    transformer_output
-                )
+                (
+                    inv_features,
+                    ev_features,
+                    (alpha_inv, alpha_ev),
+                ) = transformer_output
                 att_scores["inv"][layer_idx] = alpha_inv
                 att_scores["ev"][layer_idx] = alpha_ev
 
             else:
                 inv_features, ev_features = transformer_output
 
+            # After each layer, truncate to real atoms only.  Ghost atom
+            # features are stale (they never receive messages because they
+            # only appear as senders, never receivers).  Keeping them would
+            # pollute the next layer.
+            if has_ghosts:
+                inv_features = inv_features[:n_real]
+                ev_features = ev_features[:n_real]
+
+        if has_ghosts:
+            # Final pad+sync so downstream code (output block, energy sum)
+            # sees n_total features.  The output block only reads [:n_real],
+            # but the autograd graph for edge_forces needs features at ghost
+            # indices to be connected to the real atom features.
+            inv_features = self._lammps_pad_and_sync(inv_features)
+            ev_features = self._lammps_pad_and_sync(ev_features)
+
         if return_att:
             return inv_features, ev_features, att_scores
         else:
             return inv_features, ev_features
+
+    def _lammps_pad_and_sync(self, features: torch.Tensor) -> torch.Tensor:
+        """Pad real-atom features with zeros for ghosts, then sync via LAMMPS.
+
+        After truncation to n_real atoms, ghost atoms have no features.
+        This pads the tensor back to n_total and calls LAMMPS
+        forward_exchange to copy real atom features to their ghost copies.
+        The backward pass (reverse_exchange) accumulates ghost gradients
+        back onto the real atoms, which is essential for correct edge forces.
+        """
+        n_real, n_total = self.lammps_natoms
+        n_ghost = n_total - n_real
+        pad = torch.zeros(
+            (n_ghost, features.shape[1]),
+            dtype=features.dtype,
+            device=features.device,
+        )
+        features = torch.cat((features, pad), dim=0)
+        features = utils.LAMMPS_MP.apply(features, self.lammps_class)
+        return features
 
     def _create_output_dict(
         self,
@@ -353,6 +475,7 @@ class So3krates(torch.nn.Module):
         hessian: torch.Tensor,
         edge_forces: torch.Tensor,
         inv_features: Optional[torch.Tensor],
+        ev_features: Optional[torch.Tensor],
         att_scores: Optional[torch.Tensor],
         training: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
@@ -364,6 +487,7 @@ class So3krates(torch.nn.Module):
             "hessian": hessian,
             "edge_forces": edge_forces,
             "inv_features": inv_features,
+            "ev_features": ev_features,
             "att_scores": att_scores,
         }
 
@@ -380,9 +504,9 @@ class So3krates(torch.nn.Module):
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
         return_descriptors: bool = False,
+        return_eqv_descriptors: bool = False,
         return_att: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
         self.batch_segments = data["batch"]
         self.data_ptr = data["ptr"]
 
@@ -408,18 +532,27 @@ class So3krates(torch.nn.Module):
             data,
         )
 
-        total_energy = scatter.scatter_sum(
-            src=atomic_energies,
-            index=self.batch_segments,
-            dim=0,
-            dim_size=self.data_ptr.shape[0] - 1,
-        ).squeeze(-1)
+        if self.is_lammps:
+            n_real = self.lammps_natoms[0]
+            total_energy = scatter.scatter_sum(
+                src=atomic_energies[:n_real],
+                index=self.batch_segments[:n_real],
+                dim=0,
+                dim_size=1,
+            ).squeeze(-1)
+        else:
+            total_energy = scatter.scatter_sum(
+                src=atomic_energies,
+                index=self.batch_segments,
+                dim=0,
+                dim_size=self.data_ptr.shape[0] - 1,
+            ).squeeze(-1)
 
         forces, virials, stress, hessian, edge_forces = utils.get_outputs(
             energy=total_energy,
             positions=self.positions,
             displacement=self.displacement,
-            vectors=self.vectors,
+            vectors=self.ctx.vectors,
             cell=self.cell,
             training=training,
             compute_force=compute_force,
@@ -428,8 +561,10 @@ class So3krates(torch.nn.Module):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
         )
+        if lammps_mliap:
+            del self.ctx
         return self._create_output_dict(
-            energy=total_energy,
+            total_energy=total_energy,
             forces=forces,
             virials=virials,
             stress=stress,
@@ -437,6 +572,7 @@ class So3krates(torch.nn.Module):
             edge_forces=edge_forces,
             att_scores=att_scores if return_att else None,
             inv_features=inv_features if return_descriptors else None,
+            ev_features=(ev_features if return_eqv_descriptors else None),
             training=training,
         )
 
@@ -445,6 +581,7 @@ class SO3LR(So3krates):
     def __init__(
         self,
         zbl_repulsion_bool: bool = True,
+        nhl_repulsion_bool: bool = False,
         electrostatic_energy_bool: bool = True,
         electrostatic_energy_scale: float = 4.0,
         dispersion_energy_bool: bool = True,
@@ -452,6 +589,17 @@ class SO3LR(So3krates):
         dispersion_energy_cutoff_lr_damping: float = None,
         r_max_lr: float = 12.0,
         neighborlist_format_lr: str = "sparse",
+        use_pme: bool = False,
+        pme_smearing: float = None,
+        pme_mesh_spacing: float = None,
+        output_partial_charges: bool = False,
+        use_pme_dispersion: bool = False,
+        pme_dispersion_smearing: Optional[float] = None,
+        pme_dispersion_mesh_spacing: Optional[float] = None,
+        pme_mesh_rule: str = "jax",
+        legacy_dispersion_bool: bool = True,
+        c6_ratios_bool: bool = False,
+        use_simple_hirshfeld: bool = False,
         *args,
         **kwargs,
     ):
@@ -459,7 +607,13 @@ class SO3LR(So3krates):
 
         # Store SO3LR-specific constructor arguments as attributes
         self.zbl_repulsion_bool = zbl_repulsion_bool
+        self.nhl_repulsion_bool = nhl_repulsion_bool
         self.electrostatic_energy_bool = electrostatic_energy_bool
+        # When True, partial charges (and the dipole) are computed and
+        # returned even if electrostatic_energy_bool is False — e.g. to feed
+        # an external electrostatics solver (NVAlchemi-native PME) without
+        # double-counting the model's own electrostatic energy.
+        self.output_partial_charges = output_partial_charges
         self.electrostatic_energy_scale = electrostatic_energy_scale
         self.dispersion_energy_bool = dispersion_energy_bool
         self.dispersion_energy_scale = dispersion_energy_scale
@@ -467,6 +621,8 @@ class SO3LR(So3krates):
             dispersion_energy_cutoff_lr_damping
         )
         self.neighborlist_format_lr = neighborlist_format_lr
+        self.c6_ratios_bool = c6_ratios_bool
+        self.use_simple_hirshfeld = use_simple_hirshfeld
 
         if r_max_lr is not None:
             self.r_max_lr = r_max_lr
@@ -475,8 +631,11 @@ class SO3LR(So3krates):
 
         self.use_lr = False
 
-        # Short-range repulsion
-        self.zbl_repulsion = ZBLRepulsion()
+        # Short-range repulsion — learnable ZBL or fixed-table NHL
+        if nhl_repulsion_bool:
+            self.nhl_repulsion = NHLRepulsion()
+        else:
+            self.zbl_repulsion = ZBLRepulsion()
 
         # i'm sorry for this. but in the jax version they always initiate
         # the long range modules even though the booleans are set to false.
@@ -484,6 +643,11 @@ class SO3LR(So3krates):
         # to jax back and forth ... its ugly and wasteful, i know.
 
         # Electrostatics
+        # `use_pme` no longer excludes this gate: PME electrostatics adds
+        # a k-space correction on top of `ElectrostaticInteraction`'s
+        # PME-aware real-space residual (mirrors the dispersion gate
+        # below), so the long-range neighbor list is always needed when
+        # electrostatics is enabled, whether or not PME is on.
         if self.electrostatic_energy_bool:
             self.use_lr = True
         self.partial_charges_output_block = PartialChargesOutputHead(
@@ -495,11 +659,36 @@ class SO3LR(So3krates):
         self.electrostatic_potential = ElectrostaticInteraction(
             neighborlist_format_lr=self.neighborlist_format_lr
         )
+        self.use_pme = use_pme
+        self.pme_mesh_rule = pme_mesh_rule
+        if use_pme:
+            _smearing = pme_smearing or self.r_max / 5.0
+            _mesh_spacing = pme_mesh_spacing or _smearing / 2.0
+            self.pme_smearing = _smearing
+            self.pme_mesh_spacing = _mesh_spacing
+            self.pme_electrostatic_potential = PMEElectrostaticInteraction(
+                smearing=_smearing,
+                mesh_spacing=_mesh_spacing,
+                pme_mesh_rule=pme_mesh_rule,
+            )
 
         # Dispersion
+        # Like electrostatics above, PME dispersion only *adds* a
+        # k-space correction on top of DispersionInteraction's real-space
+        # residual + C8/C10 terms — those always need the long-range
+        # neighbor list, whether or not use_pme_dispersion is set. So
+        # this gate stays unconditional (no `and not
+        # use_pme_dispersion`), matching the electrostatics gate above.
         if self.dispersion_energy_bool:
             self.use_lr = True
-        self.hirshfeld_output_block = HirshfeldOutputHead(
+
+        # Hirshfeld head: new simplified arch or original attention-based arch
+        HirshfeldHead = (
+            SimpleHirshfeldOutputHead
+            if use_simple_hirshfeld
+            else HirshfeldOutputHead
+        )
+        self.hirshfeld_output_block = HirshfeldHead(
             num_features=self.num_features,
             regression_dim=self.energy_regression_dim,
             activation_fn=self.energy_activation_fn,
@@ -507,6 +696,60 @@ class SO3LR(So3krates):
         self.dispersion_potential = DispersionInteraction(
             neighborlist_format_lr=self.neighborlist_format_lr
         )
+        self.legacy_dispersion_bool = legacy_dispersion_bool
+
+        self.use_pme_dispersion = use_pme_dispersion
+        if use_pme_dispersion:
+            _disp_smearing = pme_dispersion_smearing or self.r_max_lr / 5.0
+            _disp_mesh_spacing = (
+                pme_dispersion_mesh_spacing or _disp_smearing / 2.0
+            )
+            self.pme_dispersion_smearing = _disp_smearing
+            self.pme_dispersion_mesh_spacing = _disp_mesh_spacing
+            self.pme_dispersion_potential = PMEDispersionInteraction(
+                smearing=_disp_smearing,
+                mesh_spacing=_disp_mesh_spacing,
+                pme_mesh_rule=pme_mesh_rule,
+            )
+
+        # Independent C6 ratio head (new JAX feature)
+        if c6_ratios_bool:
+            self.c6_ratios_output_block = C6RatiosOutputHead(
+                num_features=self.num_features,
+                regression_dim=self.energy_regression_dim,
+                activation_fn=self.energy_activation_fn,
+            )
+
+    def load_state_dict(self, state_dict, strict=True):
+        """
+        Load state dict with backward compatibility for models saved before
+        degree_repeats and vera_* matrices were converted to buffers.
+        """
+        # Check if state dict is missing the new buffer keys
+        missing_buffer_keys = [
+            key
+            for key in self.state_dict().keys()
+            if "degree_repeats" in key
+            or "vera_" in key
+            or "resid_lambdas" in key
+            or "x0_lambdas" in key
+        ]
+
+        has_missing_buffers = any(
+            key not in state_dict for key in missing_buffer_keys
+        )
+
+        if has_missing_buffers and strict:
+            # Old state dict detected - load with strict=False
+            # The missing buffers are already initialized correctly in __init__
+            print(
+                "Loading old state dict format (missing degree_repeats/vera buffers). "
+                "Using strict=False to skip non-trainable computed buffers."
+            )
+            return super().load_state_dict(state_dict, strict=False)
+        else:
+            # New state dict or strict=False explicitly requested
+            return super().load_state_dict(state_dict, strict=strict)
 
     def _get_graph(
         self,
@@ -533,7 +776,6 @@ class SO3LR(So3krates):
         electrostatic_energies: Optional[torch.Tensor] = None,
         dispersion_energies: Optional[torch.Tensor] = None,
     ):
-
         torch.set_printoptions(precision=8)
         if self.zbl_repulsion_bool and zbl_atomic_energies is not None:
             atomic_energies += zbl_atomic_energies
@@ -560,12 +802,16 @@ class SO3LR(So3krates):
         compute_hessian: bool = False,
         compute_edge_forces: bool = False,
         batch: Optional[torch.tensor] = None,
+        vectors_all: Optional[torch.Tensor] = None,
     ):
         return utils.get_outputs(
             energy=energy,
             positions=positions,
             displacement=displacement,
-            vectors=vectors,
+            # In LAMMPS+LR mode, vectors_all is the single leaf
+            # tensor covering all pairs. Computing edge forces
+            # w.r.t. it yields combined SR+LR pair forces.
+            vectors=(vectors_all if vectors_all is not None else vectors),
             cell=cell,
             training=training,
             compute_force=compute_force,
@@ -588,10 +834,12 @@ class SO3LR(So3krates):
         dipole: torch.Tensor,
         hirshfeld_ratios: torch.Tensor,
         inv_features: torch.Tensor,
+        ev_features: torch.Tensor,
         att_scores: torch.Tensor,
+        node_energy: Optional[torch.Tensor] = None,
+        c6_ratios: Optional[torch.Tensor] = None,
         training: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
         return {
             "energy": total_energy,
             "forces": forces,
@@ -599,11 +847,14 @@ class SO3LR(So3krates):
             "stress": stress,
             "hessian": hessian,
             "edge_forces": edge_forces,
+            "node_energy": node_energy,
             "zbl_repulsion": zbl_atomic_energies,
             "partial_charges": partial_charges,
             "dipole": dipole,
             "hirshfeld_ratios": hirshfeld_ratios,
+            "c6_ratios": c6_ratios,
             "inv_features": inv_features,
+            "ev_features": ev_features,
             "att_scores": att_scores,
         }
 
@@ -618,11 +869,11 @@ class SO3LR(So3krates):
         compute_hessian: bool = False,
         compute_edge_forces: bool = False,
         return_descriptors: bool = False,
+        return_eqv_descriptors: bool = False,
         compute_atomic_stresses: bool = False,
         lammps_mliap: bool = False,
         return_att: bool = False,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
         self.batch_segments = data["batch"]
         self.data_ptr = data["ptr"]
         repr_output = self.get_representation(
@@ -656,7 +907,16 @@ class SO3LR(So3krates):
             self.lengths_lr = self.ctx.lengths_lr
 
         zbl_atomic_energies = None
-        if self.zbl_repulsion_bool:
+        if getattr(self, "nhl_repulsion_bool", False):
+            zbl_atomic_energies = self.nhl_repulsion(
+                atomic_numbers=data["atomic_numbers"],
+                cutoffs=self.cutoffs,
+                senders=self.senders,
+                receivers=self.receivers,
+                lengths=self.lengths,
+                num_nodes=inv_features.shape[0],
+            )
+        elif self.zbl_repulsion_bool:
             zbl_atomic_energies = self.zbl_repulsion(
                 atomic_numbers=data["atomic_numbers"],
                 cutoffs=self.cutoffs,
@@ -666,7 +926,15 @@ class SO3LR(So3krates):
                 num_nodes=inv_features.shape[0],
             )
         electrostatic_energies = None
-        if self.electrostatic_energy_bool:
+        partial_charges = None
+        dipole = None
+        # Compute charges/dipole when needed for the model's own
+        # electrostatics OR when explicitly requested as an output (the
+        # latter feeds an external solver without adding electrostatic
+        # energy here).
+        if self.electrostatic_energy_bool or getattr(
+            self, "output_partial_charges", False
+        ):
             partial_charges = self.partial_charges_output_block(
                 inv_features=inv_features,
                 atomic_numbers=data["atomic_numbers"],
@@ -681,21 +949,59 @@ class SO3LR(So3krates):
                 batch_segments=self.batch_segments,
                 num_graphs=self.num_graphs,
             )
-            electrostatic_energies = self.electrostatic_potential(
-                partial_charges=partial_charges,
-                senders_lr=self.senders_lr,
-                receivers_lr=self.receivers_lr,
-                lengths_lr=self.lengths_lr,
-                num_nodes=inv_features.shape[0],
-                cutoff_lr=self.r_max_lr,
-                electrostatic_energy_scale=self.electrostatic_energy_scale,
-            )
+        if self.electrostatic_energy_bool:
+            if getattr(self, "use_pme", False):
+                electrostatic_energies = self.electrostatic_potential(
+                    partial_charges=partial_charges,
+                    senders_lr=self.senders_lr,
+                    receivers_lr=self.receivers_lr,
+                    lengths_lr=self.lengths_lr,
+                    num_nodes=inv_features.shape[0],
+                    cutoff_lr=self.r_max_lr,
+                    electrostatic_energy_scale=(
+                        self.electrostatic_energy_scale
+                    ),
+                    use_pme=True,
+                    pme_smearing=getattr(self, "pme_smearing", None),
+                )
+                kspace_electrostatic_energies = self.pme_electrostatic_potential(
+                    partial_charges=partial_charges,
+                    # strained positions (== self.positions without
+                    # strain) so k-space matches the strained cell
+                    positions=data["positions"],
+                    cell=self.cell,
+                    batch_segments=self.batch_segments,
+                    num_graphs=self.num_graphs,
+                    num_nodes=inv_features.shape[0],
+                )
+                electrostatic_energies = (
+                    electrostatic_energies + kspace_electrostatic_energies
+                )
+            else:
+                electrostatic_energies = self.electrostatic_potential(
+                    partial_charges=partial_charges,
+                    senders_lr=self.senders_lr,
+                    receivers_lr=self.receivers_lr,
+                    lengths_lr=self.lengths_lr,
+                    num_nodes=inv_features.shape[0],
+                    cutoff_lr=self.r_max_lr,
+                    electrostatic_energy_scale=(
+                        self.electrostatic_energy_scale
+                    ),
+                )
         dispersion_energies = None
+        hirshfeld_ratios = None
+        c6_ratios = None
         if self.dispersion_energy_bool:
             hirshfeld_ratios = self.hirshfeld_output_block(
                 inv_features=inv_features,
                 atomic_numbers=data["atomic_numbers"],
             )
+            if getattr(self, "c6_ratios_bool", False):
+                c6_ratios = self.c6_ratios_output_block(
+                    inv_features=inv_features,
+                    atomic_numbers=data["atomic_numbers"],
+                )
             dispersion_energies = self.dispersion_potential(
                 hirshfeld_ratios=hirshfeld_ratios,
                 atomic_numbers=data["atomic_numbers"],
@@ -706,7 +1012,37 @@ class SO3LR(So3krates):
                 cutoff_lr=self.r_max_lr,
                 cutoff_lr_damping=self.dispersion_energy_cutoff_lr_damping,
                 dispersion_energy_scale=self.dispersion_energy_scale,
+                c6_ratios=c6_ratios,
+                use_pme_dispersion=getattr(self, "use_pme_dispersion", False),
+                pme_dispersion_smearing=getattr(
+                    self, "pme_dispersion_smearing", None
+                ),
+                legacy_dispersion_bool=getattr(
+                    self, "legacy_dispersion_bool", True
+                ),
             )
+
+            if getattr(self, "use_pme_dispersion", False):
+                c6_i = atomic_c6_pseudo_charges(
+                    atomic_numbers=data["atomic_numbers"],
+                    hirshfeld_ratios=hirshfeld_ratios,
+                    c6_ratios=c6_ratios,
+                    legacy_dispersion_bool=getattr(
+                        self, "legacy_dispersion_bool", True
+                    ),
+                )
+                c6_pseudo_charges = torch.sqrt(torch.clamp(c6_i, min=0))
+                kspace_dispersion_energies = self.pme_dispersion_potential(
+                    c6_pseudo_charges=c6_pseudo_charges,
+                    positions=data["positions"],
+                    cell=self.cell,
+                    batch_segments=self.batch_segments,
+                    num_graphs=self.num_graphs,
+                    num_nodes=inv_features.shape[0],
+                )
+                dispersion_energies = (
+                    dispersion_energies + kspace_dispersion_energies
+                )
 
         atomic_energies = self._combine_energies(
             atomic_energies=atomic_energies,
@@ -714,17 +1050,31 @@ class SO3LR(So3krates):
             electrostatic_energies=electrostatic_energies,
             dispersion_energies=dispersion_energies,
         )
-        total_energy = scatter.scatter_sum(
-            src=atomic_energies,
-            index=self.batch_segments,
-            dim=0,
-            dim_size=self.data_ptr.shape[0] - 1,
-        ).squeeze(-1)
+        # In LAMMPS mode, only sum real (non-ghost) atom energies so that
+        # edge forces derived via autograd do not include ghost contributions.
+        if self.is_lammps:
+            n_real = self.lammps_natoms[0]
+            total_energy = scatter.scatter_sum(
+                src=atomic_energies[:n_real],
+                index=self.batch_segments[:n_real],
+                dim=0,
+                dim_size=1,
+            ).squeeze(-1)
+        else:
+            total_energy = scatter.scatter_sum(
+                src=atomic_energies,
+                index=self.batch_segments,
+                dim=0,
+                dim_size=self.data_ptr.shape[0] - 1,
+            ).squeeze(-1)
         forces, virials, stress, hessian, edge_forces = self._get_outputs(
             energy=total_energy,
             positions=self.positions,
             displacement=self.displacement,
-            vectors=self.vectors,
+            # Use original (non-negated) vectors for correct edge force sign.
+            # self.vectors is negated (-1 * ctx.vectors) for So3krates' internal
+            # convention, but edge forces must be w.r.t. the original LAMMPS vectors.
+            vectors=self.ctx.vectors,
             cell=self.cell,
             training=training,
             compute_force=compute_force,
@@ -733,7 +1083,13 @@ class SO3LR(So3krates):
             compute_hessian=compute_hessian,
             compute_edge_forces=compute_edge_forces,
             batch=data["batch"],
+            # In LAMMPS+LR mode, vectors_all is the single leaf tensor
+            # for all pairs. Edge forces computed w.r.t. it give combined
+            # SR+LR pair forces in one autograd call.
+            vectors_all=self.ctx.vectors_all,
         )
+        if lammps_mliap:
+            del self.ctx
 
         return self._create_output_dict(
             total_energy=total_energy,
@@ -743,15 +1099,16 @@ class SO3LR(So3krates):
             hessian=hessian,
             edge_forces=edge_forces,
             zbl_atomic_energies=zbl_atomic_energies,
-            partial_charges=(
-                partial_charges if self.electrostatic_energy_bool else None
-            ),
-            dipole=dipole if self.electrostatic_energy_bool else None,
+            partial_charges=partial_charges,
+            dipole=dipole,
             hirshfeld_ratios=(
                 hirshfeld_ratios if self.dispersion_energy_bool else None
             ),
+            c6_ratios=c6_ratios,
             inv_features=inv_features if return_descriptors else None,
+            ev_features=(ev_features if return_eqv_descriptors else None),
             att_scores=att_scores if return_att else None,
+            node_energy=atomic_energies,
             training=training,
         )
 
@@ -768,7 +1125,7 @@ class MultiHeadSO3LR(SO3LR):
         self.atomic_energy_output_block = MultiAtomicEnergyOutputHead(
             num_features=self.num_features,
             energy_regression_dim=self.energy_regression_dim,
-            final_output_features=1,  # TODO: remove hardcoded value
+            final_output_features=1,  # scalar energy per atom
             layers=self.final_mlp_layers,
             bias=True,
             non_linearity=self.energy_activation_fn,
@@ -798,13 +1155,13 @@ class MultiHeadSO3LR(SO3LR):
         compute_hessian: bool = False,
         compute_edge_forces: bool = False,
         batch: Optional[torch.tensor] = None,
+        vectors_all: Optional[torch.Tensor] = None,
     ):
-
         forces, virials, stress, hessian, edge_forces = utils.get_outputs(
             energy=energy,
             positions=positions,
             displacement=displacement,
-            vectors=vectors,
+            vectors=(vectors_all if vectors_all is not None else vectors),
             cell=cell,
             training=training,
             compute_force=compute_force,
@@ -840,7 +1197,6 @@ class MultiHeadSO3LR(SO3LR):
         self,
         output_dict: dict,
     ) -> dict:
-
         row_indices = torch.arange(
             output_dict["energy"].shape[1],
             device=self.device,
@@ -883,10 +1239,12 @@ class MultiHeadSO3LR(SO3LR):
         dipole: torch.Tensor,
         hirshfeld_ratios: torch.Tensor,
         inv_features: torch.Tensor,
+        ev_features: torch.Tensor,
         att_scores: torch.Tensor,
+        node_energy: Optional[torch.Tensor] = None,
         training: bool = False,
+        c6_ratios: Optional[torch.Tensor] = None,
     ) -> Dict[str, Optional[torch.Tensor]]:
-
         # total_energy has shape (num_graphs, num_output_heads)
         # permute to shape (num_output_heads, num_graphs)
         total_energy = total_energy.permute(1, 0)
@@ -897,11 +1255,14 @@ class MultiHeadSO3LR(SO3LR):
             "stress": stress,
             "hessian": hessian,
             "edge_forces": edge_forces,
+            "node_energy": node_energy,
             "zbl_repulsion": zbl_atomic_energies,
             "partial_charges": partial_charges,
             "dipole": dipole,
             "hirshfeld_ratios": hirshfeld_ratios,
+            "c6_ratios": c6_ratios,
             "inv_features": inv_features,
+            "ev_features": ev_features,
             "att_scores": att_scores,
         }
         if self.select_heads:

@@ -126,7 +126,6 @@ class ChargeSpinEmbedding(torch.nn.Module):
                 if m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
 
-    @torch.compiler.disable()
     def forward(
         self,
         elements_one_hot: torch.Tensor,
@@ -148,32 +147,35 @@ class ChargeSpinEmbedding(torch.nn.Module):
             torch.Tensor: The charge-spin embedding for the input.
         """
         q = self.Wq(elements_one_hot)
-        idx = (psi // torch.inf).type(torch.int)
-        k = self.Wk[idx][batch_segments]
-        v = self.Wv[idx][batch_segments]
+        # Row 0 of Wk/Wv for psi>=0, row 1 for psi<0.
+        # Equivalent to the old (psi // inf) trick but trace-stable under
+        # torch.compile: (psi < 0).long() never graph-breaks on the sign.
+        idx = (psi < 0).long()
+        # Expand graph-level idx to atom-level using batch_segments
+        idx_per_atom = idx[batch_segments]
+        k = self.Wk[idx_per_atom]
+        v = self.Wv[idx_per_atom]
         q_x_k = (q * k).sum(dim=-1) / self.sqrt_dim
         y = torch.nn.functional.softplus(q_x_k)
-        # Use batch size information to avoid FX specialization
+        # num_graphs is always a Python int at every real call site in
+        # models.py (self.num_graphs).  When it IS an int the `is None`
+        # guard is a compile-time constant-false, so the int() fallback
+        # is never traced by Dynamo — no graph-break, no recompilation.
         if num_graphs is None:
-            # Fallback to data-dependent computation
             if batch_segments.numel() == 0:
-                computed_num_graphs = 0
+                num_graphs = 0
             else:
-                # This fallback should not be reached in normal operation
-                computed_num_graphs = int(batch_segments.max()) + 1
-        else:
-            computed_num_graphs = num_graphs
+                num_graphs = int(batch_segments.max()) + 1
         denominator = (
             scatter.scatter_sum(
                 src=y,
                 index=batch_segments,
                 dim=0,
-                dim_size=computed_num_graphs,
+                dim_size=num_graphs,
             )
             + eps
         )
         att = psi[batch_segments] * y / denominator[batch_segments]
         v_att = att[:, None] * v
-        v_att_temp = v_att.clone()
-        e_psi = v_att_temp + self.mlp(v_att)
+        e_psi = v_att + self.mlp(v_att)
         return e_psi
